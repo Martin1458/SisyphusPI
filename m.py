@@ -50,17 +50,17 @@ N_HEADS: int = 4         # Number of attention heads
 LEARNING_RATE: float = 0.001
 WEIGHT_DECAY: float = 1.0  # High decay forces the model to find the "simple" circle rule
 TRAIN_PCT: float = 0.4     # Hide 60% of the data from the model to test generalization
-STEPS: int = 100       # Maximum training steps
+STEPS: int = 10000       # Maximum training steps
 
 # start main loop
 plotting: bool = False
-num_of_sacrifices: int = 5
+num_of_sacrifices: int = 15
 
 for _ in range(num_of_sacrifices):
     # configure per-sacrifice
     grooked: bool = False
-    N: int = prime(random.randint(10, 15)) # The modulus
-
+    #N: int = prime(random.randint(10, 25)) # The modulus
+    N = 67
     # generate data
     (train_in, train_lab), (test_in, test_lab) = data_gen_utils.generate_data(N, TRAIN_PCT)
 

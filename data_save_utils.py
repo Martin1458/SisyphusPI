@@ -1,6 +1,7 @@
 import json
 import os
 import re
+from copy import deepcopy
 
 EMPTY_N_ENTRY = {
     'num_of_models': 0,
@@ -40,7 +41,8 @@ class ModelInfo:
     def __init__(self, data_path: str, N: int):
         self.data_path = os.path.join(os.path.dirname(__file__), data_path)
         self.N = N
-        self.model_data = EMPTY_MODEL_ENTRY.copy()
+        # Use a deep copy so each model gets its own independent lists
+        self.model_data = deepcopy(EMPTY_MODEL_ENTRY)
         self._initialize_data_file()
 
     def add_data_point(self, step: int, train_acc: float, test_acc: float):
@@ -72,7 +74,8 @@ class ModelInfo:
 
         n_str = str(self.N)
         if n_str not in data['N']:
-            data['N'][n_str] = EMPTY_SMALL_DATA_ENTRY.copy()
+            # Deep copy so each N entry has its own avg_data lists
+            data['N'][n_str] = deepcopy(EMPTY_SMALL_DATA_ENTRY)
 
         n_entry = data['N'][n_str]
         n_entry['num_of_sacrifices'] += 1
