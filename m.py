@@ -50,7 +50,7 @@ N_HEADS: int = 4         # Number of attention heads
 LEARNING_RATE: float = 0.001
 WEIGHT_DECAY: float = 1.0  # High decay forces the model to find the "simple" circle rule
 TRAIN_PCT: float = 0.4     # Hide 60% of the data from the model to test generalization
-STEPS: int = 1000       # Maximum training steps
+STEPS: int = 100       # Maximum training steps
 
 # start main loop
 plotting: bool = False
@@ -59,7 +59,7 @@ num_of_sacrifices: int = 5
 for _ in range(num_of_sacrifices):
     # configure per-sacrifice
     grooked: bool = False
-    N: int = prime(random.randint(3, 5)) # The modulus
+    N: int = prime(random.randint(10, 15)) # The modulus
 
     # generate data
     (train_in, train_lab), (test_in, test_lab) = data_gen_utils.generate_data(N, TRAIN_PCT)
@@ -75,7 +75,7 @@ for _ in range(num_of_sacrifices):
         fig, ax1 = plt.subplots(1, 1, figsize=(8, 6))
 
     # setup ModelInfo to save data
-    model_info = ModelInfo(path=r'output\data.json', small_path=r'output\small_data.json', N=N)
+    model_info = ModelInfo(data_path=r'output\data.json', N=N)
 
 
     print(f"Training on {len(train_in)} samples. Testing on {len(test_in)} samples. Modulus N={N}.")
@@ -123,6 +123,6 @@ for _ in range(num_of_sacrifices):
 
     # save model info 
     model_info.save_model_info(grooked)
-    model_info.save_small_info(grooked)
+    model_info.save_data_info(grooked)
 
 print("All sacrifices complete.")
