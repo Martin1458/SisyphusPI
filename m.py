@@ -12,6 +12,7 @@ import sys
 
 import data_gen_utils
 from data_save_utils import ModelInfo, format_json_number_lists
+import configparser
 
 from sklearn.metrics import confusion_matrix
 import numpy as np
@@ -44,19 +45,28 @@ class NanoMath(nn.Module):
         x = self.transformer(x)
         return self.output_head(x[:, -1, :])
 
+_config = configparser.ConfigParser()
+_config.read(os.path.join(os.path.dirname(__file__), 'config.ini'), encoding='utf-8')
 
-# configuration
-D_MODEL: int = 128       # Hidden dimension
-N_HEADS: int = 4         # Number of attention heads
-LEARNING_RATE: float = 0.005
-WEIGHT_DECAY: float = 1.0  # High decay forces the model to find the "simple" circle rule
-TRAIN_PCT: float = 0.4     # Hide 60% of the data from the model to test generalization
-STEPS: int = 100       # Maximum training steps
+D_MODEL: int = _config.getint('model', 'D_MODEL', fallback=128)
+N_HEADS: int = _config.getint('model', 'N_HEADS', fallback=4)
+WEIGHT_DECAY: float = _config.getfloat('model', 'WEIGHT_DECAY', fallback=1.0)
+TRAIN_PCT: float = _config.getfloat('model', 'TRAIN_PCT', fallback=0.4)
+STEPS: int = _config.getint('model', 'STEPS', fallback=10000)
 
-DATA_FOLDER_PATH: str = os.path.join('output')
+NUM_OF_WAVES: int = _config.getint('training', 'NUM_OF_WAVES', fallback=3)
+MIN_N: int = _config.getint('training', 'MIN_N', fallback=20)
+MAX_N: int = _config.getint('training', 'MAX_N', fallback=200)
+_lr_raw = _config.get('training', 'LEARNING_RATES', fallback='0.005')
+LEARNING_RATES: list[float] = [float(x.strip()) for x in _lr_raw.split(',') if x.strip()]
+
+OUTPUT_DIR: str = _config.get('paths', 'OUTPUT_DIR', fallback='output')
+PLOTTING: bool = _config.getboolean('plot', 'PLOTTING', fallback=False)
+
+DATA_FOLDER_PATH: str = os.path.join(OUTPUT_DIR)
 DATA_FILE_PATH: str = os.path.join(DATA_FOLDER_PATH, 'data.json')
 
-plotting: bool = False
+plotting: bool = PLOTTING
 
 import json
 
@@ -66,6 +76,7 @@ def train_until_grok(
     learning_rate: float,
     weight_decay: float,
     train_pct: float,
+    info: dict,
 ) -> bool:
     """Train a single model for modulus N until it groks or hits max steps.
 
@@ -94,7 +105,9 @@ def train_until_grok(
     model_output_data_file = os.path.join(m, 'data.json')
     model_info = ModelInfo(N=N, data_path=DATA_FILE_PATH, output_dir_path=m)
 
-    print(f"Training on {len(train_in)} samples. Testing on {len(test_in)} samples. Modulus N={N}.")
+    print(f"Training on {len(train_in)} samples. Testing on {len(test_in)} samples.")
+    for key, value in info.items():
+        print(f"  {key}: {value}")
     start_time = time.perf_counter()
     grokked = False
 
@@ -151,19 +164,25 @@ def train_until_grok(
 
 
 # start main loop: choose N for each sacrifice and train
-num_of_sacrifices: int = 5
-max_N: int = 200
-list_of_lr: list[float] = [0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1]
-
-for learning_rate in list_of_lr:
-    LEARNING_RATE = learning_rate
-    for N in range(1, max_N + 1):
-        """        
-        with open(DATA_FILE_PATH, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        num_done = data.get('num_of_sacrifices', 0)
-        N = num_done + 3
-        """
-        train_until_grok(N, LEARNING_RATE, WEIGHT_DECAY, TRAIN_PCT)
+no_of_all_sacrifices = NUM_OF_WAVES * len(LEARNING_RATES) * (MAX_N - MIN_N + 1)
+for wave_index in range(NUM_OF_WAVES):
+    for learning_rate in LEARNING_RATES:
+        for N in range(MIN_N, MAX_N + 1):
+            """        
+            with open(DATA_FILE_PATH, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            num_done = data.get('num_of_sacrifices', 0)
+            N = num_done + 3
+            """
+            model_no = (wave_index * len(LEARNING_RATES) * (MAX_N - MIN_N + 1) +
+                        LEARNING_RATES.index(learning_rate) * (MAX_N - MIN_N + 1) +
+                        (N - MIN_N) + 1)
+            info = {
+                'wave_index': wave_index,
+                'learning_rate': learning_rate,
+                'N': N,
+                'total_progress': f"{model_no/no_of_all_sacrifices:.2%}",
+            }
+            train_until_grok(N, learning_rate, WEIGHT_DECAY, TRAIN_PCT, info)
 
 print("All sacrifices complete.")

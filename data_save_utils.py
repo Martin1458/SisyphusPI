@@ -107,9 +107,16 @@ class ModelInfo:
         base_dir = os.path.dirname(self.data_path)
         n_dir = os.path.join(base_dir, str(self.N))
 
-        model_files = [
-            fname for fname in os.listdir(n_dir) if fname.endswith('.json')
-        ] if os.path.isdir(n_dir) else []
+        # Collect all model JSON files for this N, even if they
+        # are nested inside subfolders (e.g. separate learning rates).
+        # This makes the averaging logic robust to directory layouts
+        # like output/N/lr_id/0.json.
+        model_files: list[str] = []
+        if os.path.isdir(n_dir):
+            for root, _dirs, files in os.walk(n_dir):
+                for fname in files:
+                    if fname.endswith('.json'):
+                        model_files.append(os.path.join(root, fname))
 
         # Collect only grokked models for phase-aligned averaging.
         all_steps: list[list[int]] = []
