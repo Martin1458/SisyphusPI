@@ -57,14 +57,16 @@ STEPS: int = _config.getint('model', 'STEPS', fallback=10000)
 NUM_OF_WAVES: int = _config.getint('training', 'NUM_OF_WAVES', fallback=3)
 MIN_N: int = _config.getint('training', 'MIN_N', fallback=20)
 MAX_N: int = _config.getint('training', 'MAX_N', fallback=200)
+_wd_raw = _config.get('training', 'WEIGHT_DECAYS', fallback=str(WEIGHT_DECAY))
+WEIGHT_DECAYS: list[float] = [float(x.strip()) for x in _wd_raw.split(',') if x.strip()]
 _lr_raw = _config.get('training', 'LEARNING_RATES', fallback='0.005')
 LEARNING_RATES: list[float] = [float(x.strip()) for x in _lr_raw.split(',') if x.strip()]
 
 OUTPUT_DIR: str = _config.get('paths', 'OUTPUT_DIR', fallback='output')
 PLOTTING: bool = _config.getboolean('plot', 'PLOTTING', fallback=False)
 
-DATA_FOLDER_PATH: str = os.path.join(OUTPUT_DIR)
-DATA_FILE_PATH: str = os.path.join(DATA_FOLDER_PATH, 'data.json')
+# Aggregate JSON storing averaged stats across runs
+AGGREGATE_DATA_PATH: str = os.path.join(OUTPUT_DIR, 'data.json')
 
 plotting: bool = PLOTTING
 
@@ -77,6 +79,7 @@ def train_until_grok(
     weight_decay: float,
     train_pct: float,
     info: dict,
+    model_dir: str,
 ) -> bool:
     """Train a single model for modulus N until it groks or hits max steps.
 
@@ -100,10 +103,12 @@ def train_until_grok(
         fig, ax1 = plt.subplots(1, 1, figsize=(8, 6))
 
     # setup ModelInfo to save data
-    model_output_folder = os.path.join(DATA_FOLDER_PATH, os.path.join(str(N)))
-    m = os.path.join(model_output_folder, os.path.join(str(learning_rate).replace('.', '_')))
-    model_output_data_file = os.path.join(m, 'data.json')
-    model_info = ModelInfo(N=N, data_path=DATA_FILE_PATH, output_dir_path=m)
+    # model_dir is computed by the caller (main loop) and should
+    # follow: OUTPUT_DIR / WEIGHT_DECAY / LEARNING_RATE / N /
+    print(f"Model directory: {model_dir}")
+    print(f"Aggregate data file: {AGGREGATE_DATA_PATH}")
+
+    model_info = ModelInfo(N=N, data_path=AGGREGATE_DATA_PATH, output_dir_path=model_dir)
 
     print(f"Training on {len(train_in)} samples. Testing on {len(test_in)} samples.")
     for key, value in info.items():
@@ -164,25 +169,37 @@ def train_until_grok(
 
 
 # start main loop: choose N for each sacrifice and train
-no_of_all_sacrifices = NUM_OF_WAVES * len(LEARNING_RATES) * (MAX_N - MIN_N + 1)
+no_of_all_sacrifices = NUM_OF_WAVES * len(WEIGHT_DECAYS) * len(LEARNING_RATES) * (MAX_N - MIN_N + 1)
 for wave_index in range(NUM_OF_WAVES):
-    for learning_rate in LEARNING_RATES:
-        for N in range(MIN_N, MAX_N + 1):
-            """        
-            with open(DATA_FILE_PATH, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            num_done = data.get('num_of_sacrifices', 0)
-            N = num_done + 3
-            """
-            model_no = (wave_index * len(LEARNING_RATES) * (MAX_N - MIN_N + 1) +
-                        LEARNING_RATES.index(learning_rate) * (MAX_N - MIN_N + 1) +
-                        (N - MIN_N) + 1)
-            info = {
-                'wave_index': wave_index,
-                'learning_rate': learning_rate,
-                'N': N,
-                'total_progress': f"{model_no/no_of_all_sacrifices:.2%}",
-            }
-            train_until_grok(N, learning_rate, WEIGHT_DECAY, TRAIN_PCT, info)
+    for weight_decay in WEIGHT_DECAYS:
+        for learning_rate in LEARNING_RATES:
+            for N in range(MIN_N, MAX_N + 1):
+                """        
+                with open(DATA_FILE_PATH, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                num_done = data.get('num_of_sacrifices', 0)
+                N = num_done + 3
+                """
+                model_no = (
+                    wave_index * len(WEIGHT_DECAYS) * len(LEARNING_RATES) * (MAX_N - MIN_N + 1)
+                    + WEIGHT_DECAYS.index(weight_decay) * len(LEARNING_RATES) * (MAX_N - MIN_N + 1)
+                    + LEARNING_RATES.index(learning_rate) * (MAX_N - MIN_N + 1)
+                    + (N - MIN_N)
+                    + 1
+                )
+                # Build per-model directory once and pass it down.
+                wd_folder = str(weight_decay).replace('.', '_')
+                lr_folder = str(learning_rate).replace('.', '_')
+                n_folder = str(N)
+                model_dir = os.path.join(OUTPUT_DIR, wd_folder, lr_folder, n_folder)
+
+                info = {
+                    'wave_index': wave_index,
+                    'weight_decay': weight_decay,
+                    'learning_rate': learning_rate,
+                    'N': N,
+                    'total_progress': f"{model_no/no_of_all_sacrifices:.2%}",
+                }
+                train_until_grok(N, learning_rate, weight_decay, TRAIN_PCT, info, model_dir)
 
 print("All sacrifices complete.")

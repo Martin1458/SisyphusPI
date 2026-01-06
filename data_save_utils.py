@@ -42,8 +42,10 @@ class ModelInfo:
     N: int
 
     def __init__(self, N: int, data_path: str, output_dir_path: str):
-        self.data_path = os.path.join(os.path.dirname(__file__), data_path)
-        self.output_dir_path = os.path.join(os.path.dirname(__file__), output_dir_path)
+        base_dir = os.path.dirname(__file__)
+        # Allow both relative (project-local) and absolute paths.
+        self.data_path = data_path if os.path.isabs(data_path) else os.path.join(base_dir, data_path)
+        self.output_dir_path = output_dir_path if os.path.isabs(output_dir_path) else os.path.join(base_dir, output_dir_path)
         self.N = N
         # Use a deep copy so each model gets its own independent lists
         self.model_data = deepcopy(EMPTY_MODEL_ENTRY)
@@ -105,15 +107,16 @@ class ModelInfo:
         # instead of raw training step index.
 
         base_dir = os.path.dirname(self.data_path)
-        n_dir = os.path.join(base_dir, str(self.N))
 
-        # Collect all model JSON files for this N, even if they
-        # are nested inside subfolders (e.g. separate learning rates).
-        # This makes the averaging logic robust to directory layouts
-        # like output/N/lr_id/0.json.
+        # Collect all model JSON files for this N, regardless of the
+        # weight-decay / learning-rate directory structure. We look for
+        # directories whose final component is the string form of N and
+        # gather all .json files inside them.
         model_files: list[str] = []
-        if os.path.isdir(n_dir):
-            for root, _dirs, files in os.walk(n_dir):
+        if os.path.isdir(base_dir):
+            for root, _dirs, files in os.walk(base_dir):
+                if os.path.basename(root) != str(self.N):
+                    continue
                 for fname in files:
                     if fname.endswith('.json'):
                         model_files.append(os.path.join(root, fname))
@@ -128,8 +131,7 @@ class ModelInfo:
 
         GROK_THRESHOLD = 99.0
 
-        for fname in model_files:
-            m_path = os.path.join(n_dir, fname)
+        for m_path in model_files:
             with open(m_path, 'r', encoding='utf-8') as mf:
                 m_data = json.load(mf)
 
