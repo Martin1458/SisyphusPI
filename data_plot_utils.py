@@ -10,6 +10,7 @@ os.environ["TCL_LIBRARY"] = tcl_path
 os.environ["TK_LIBRARY"] = tk_path
 
 import matplotlib.pyplot as plt
+import numpy as np
 
 
 def _resolve_base_paths(data_path: str) -> str:
@@ -136,6 +137,8 @@ def plot_all_models_for_N(N: int, base_dir: str = "output") -> None:
 		return int(os.path.splitext(name)[0])
 
 	_, ax = plt.subplots(1, 1, figsize=(8, 6))
+	base_step = None
+	step_size = None
 
 	for fname in sorted(model_files, key=_model_id_from_name):
 		mid = _model_id_from_name(fname)
@@ -148,7 +151,38 @@ def plot_all_models_for_N(N: int, base_dir: str = "output") -> None:
 			if not steps or not test_acc:
 				continue
 
+			# Remember the step spacing from the first valid model
+			if base_step is None and len(steps) >= 2:
+				base_step = steps[0]
+				step_size = steps[1] - steps[0]
+
 			ax.plot(steps, test_acc, label=f"model {mid} test")
+
+	# add avg curve if available
+	agg_path = _resolve_base_paths(os.path.join(base_dir, "data.json"))
+	if os.path.exists(agg_path):
+		with open(agg_path, "r", encoding="utf-8") as f:
+			agg_data = json.load(f)
+
+		n_str = str(N)
+		if "N" in agg_data and n_str in agg_data["N"]:
+			n_entry = agg_data["N"][n_str]
+			avg_data = n_entry.get("avg_data", {})
+			avg_test = avg_data.get("test_acc", [])
+			if avg_test:
+				# Use the same step spacing as the individual models if known
+				if step_size is not None and base_step is not None:
+					avg_steps = [base_step + i * step_size for i in range(len(avg_test))]
+				else:
+					avg_steps = list(range(len(avg_test)))
+				# Bold/thicker line for the average curve
+				ax.plot(
+					avg_steps,
+					avg_test,
+					label="Avg test",
+					linewidth=3.0,
+					color="black",
+				)
 
 	ax.set_xlabel("Step")
 	ax.set_ylabel("Accuracy (%)")
@@ -199,16 +233,149 @@ def plot_all_models(base_dir: str = "output") -> None:
 	plt.show()
 
 
+def plot_avg_train_time_by_N(
+	data_path: str = r"output\data.json",
+	show: bool = True,
+	ax: Optional[plt.Axes] = None,
+) -> None:
+	"""Plot average training time per N.
+
+	Reads model_training_times from the aggregate data file and plots
+	N on the x-axis vs average training time (seconds) on the y-axis.
+	"""
+
+	abs_path = _resolve_base_paths(data_path)
+	if not os.path.exists(abs_path):
+		raise FileNotFoundError(f"Aggregate data file not found: {abs_path}")
+
+	with open(abs_path, "r", encoding="utf-8") as f:
+		data = json.load(f)
+
+	if "N" not in data or not data["N"]:
+		raise ValueError("No N entries found in aggregate data")
+
+	Ns = []
+	avg_times = []
+	for n_str, n_entry in data["N"].items():
+		avg_time = n_entry.get("avg_train_time")
+		if avg_time is None:
+			continue
+		Ns.append(int(n_str))
+		avg_times.append(float(avg_time))
+
+	if not Ns:
+		raise ValueError("No training time data found in aggregate file")
+
+	sorted_pairs = sorted(zip(Ns, avg_times), key=lambda p: p[0])
+	Ns_sorted, times_sorted = zip(*sorted_pairs)
+
+	if ax is None:
+		_, ax = plt.subplots(1, 1, figsize=(8, 6))
+
+	ax.plot(Ns_sorted, times_sorted, marker="o")
+	ax.set_xlabel("N (modulus)")
+	ax.set_ylabel("Average training time (s)")
+	ax.set_title("Average training time per N")
+	ax.grid(True, alpha=0.3)
+
+	if show:
+		plt.show()
+
+
+def plot_train_time_heatmap(
+	n_per_row: int,
+	data_path: str = r"output\data.json",
+	show: bool = True,
+	ax: Optional[plt.Axes] = None,
+) -> None:
+	"""Plot a heatmap of average training times.
+
+	Each cell corresponds to one modulus N; the grid is filled
+	row-wise with N values, with at most ``n_per_row`` Ns per row.
+	Color encodes average training time (seconds), and each cell
+	is annotated with its N value.
+	"""
+
+	if n_per_row <= 0:
+		raise ValueError("n_per_row must be a positive integer")
+
+	abs_path = _resolve_base_paths(data_path)
+	if not os.path.exists(abs_path):
+		raise FileNotFoundError(f"Aggregate data file not found: {abs_path}")
+
+	with open(abs_path, "r", encoding="utf-8") as f:
+		data = json.load(f)
+
+	if "N" not in data or not data["N"]:
+		raise ValueError("No N entries found in aggregate data")
+
+	Ns: list[int] = []
+	avg_times: list[float] = []
+	for n_str, n_entry in data["N"].items():
+		avg_time = n_entry.get("avg_train_time")
+		if avg_time is None:
+			continue
+		Ns.append(int(n_str))
+		avg_times.append(float(avg_time))
+
+	if not Ns:
+		raise ValueError("No training time data found in aggregate file")
+
+	sorted_pairs = sorted(zip(Ns, avg_times), key=lambda p: p[0])
+	Ns_sorted, times_sorted = zip(*sorted_pairs)
+	Ns_sorted = list(Ns_sorted)
+	times_sorted = list(times_sorted)
+
+	n_vals = len(Ns_sorted)
+	n_cols = n_per_row
+	n_rows = (n_vals + n_cols - 1) // n_cols
+
+	grid = np.full((n_rows, n_cols), np.nan, dtype=float)
+	labels = [["" for _ in range(n_cols)] for _ in range(n_rows)]
+
+	for idx, (n_val, t_val) in enumerate(zip(Ns_sorted, times_sorted)):
+		row = idx // n_cols
+		col = idx % n_cols
+		grid[row, col] = t_val
+		labels[row][col] = str(n_val)
+
+	if ax is None:
+		_, ax = plt.subplots(1, 1, figsize=(10, 6))
+
+	cmap = plt.cm.viridis
+	im = ax.imshow(grid, cmap=cmap, aspect="auto")
+	plt.colorbar(im, ax=ax, label="Average training time (s)")
+
+	ax.set_xticks(range(n_cols))
+	ax.set_yticks(range(n_rows))
+	ax.set_xlabel("Column within row")
+	ax.set_ylabel("Row index")
+	ax.set_title("Heatmap of average training time per N")
+
+	# Annotate each cell with its N value
+	for r in range(n_rows):
+		for c in range(n_cols):
+			label = labels[r][c]
+			if not label:
+				continue
+			ax.text(c, r, label, ha="center", va="center", color="white")
+
+	if show:
+		plt.show()
+
+
 if __name__ == "__main__":
-    # Example usage
-    plot_avg_for_N(67)
-    print("0:")
-    plot_model_for_N(67, 0)
-    print("1:")
-    plot_model_for_N(67, 1)
-    print("2:")
-    plot_model_for_N(67, 2)
-    print("all 67:")
-    plot_all_models_for_N(67)
-    print("all Ns:")
-    plot_all_models()
+	# Example usage
+	#plot_avg_for_N(67)
+	#print("0:")
+	#plot_model_for_N(67, 0)
+	#print("1:")
+	#plot_model_for_N(67, 1)
+	#print("2:")
+	#plot_model_for_N(67, 2)
+	print("all 67:")
+	plot_all_models_for_N(3)
+	print("all Ns:")
+	plot_all_models()
+	print("heatmap:")
+	plot_train_time_heatmap(5)

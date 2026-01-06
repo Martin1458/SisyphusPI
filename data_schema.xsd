@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified">
+
+  <!-- Root element corresponding to data.json -->
+  <xs:element name="data">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="num_of_sacrifices" type="xs:nonNegativeInteger"/>
+        <xs:element name="num_of_grokked" type="xs:nonNegativeInteger"/>
+
+        <!-- Container for all N entries -->
+        <xs:element name="N">
+          <xs:complexType>
+            <xs:sequence>
+              <!-- One entry per modulus N; attribute value holds the N (e.g. 3, 67) -->
+              <xs:element name="entry" maxOccurs="unbounded" minOccurs="0">
+                <xs:complexType>
+                  <xs:sequence>
+                    <xs:element name="num_of_sacrifices" type="xs:nonNegativeInteger"/>
+                    <xs:element name="num_of_grokked" type="xs:nonNegativeInteger"/>
+
+                    <!-- Aggregated accuracy data for this N -->
+                    <xs:element name="avg_data">
+                      <xs:complexType>
+                        <xs:sequence>
+                          <!-- Represent accuracy arrays as arbitrary text (e.g. space- or comma-separated numbers) -->
+                          <xs:element name="train_acc" type="xs:string"/>
+                          <xs:element name="test_acc" type="xs:string"/>
+                          <xs:element name="steps_to_grok" type="xs:double"/>
+                        </xs:sequence>
+                      </xs:complexType>
+                    </xs:element>
+
+                    <!-- Average training time (seconds) across sacrifices for this N -->
+                    <xs:element name="avg_train_time" type="xs:double"/>
+
+                    <!-- Optional legacy list of per-model times, if present after conversion -->
+                    <xs:element name="model_training_times" minOccurs="0">
+                      <xs:complexType>
+                        <xs:sequence>
+                          <xs:element name="time" type="xs:double" maxOccurs="unbounded" minOccurs="0"/>
+                        </xs:sequence>
+                      </xs:complexType>
+                    </xs:element>
+
+                  </xs:sequence>
+
+                  <!-- Attribute giving the numeric N for this entry (matches the string key in JSON) -->
+                  <xs:attribute name="value" type="xs:int" use="required"/>
+                </xs:complexType>
+              </xs:element>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+</xs:schema>
