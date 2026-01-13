@@ -27,12 +27,12 @@ from config import (
     NUM_OF_WAVES,
     MIN_N,
     MAX_N,
+    N_STEP,
     WEIGHT_DECAYS,
     LEARNING_RATES,
     OUTPUT_DIR,
     PLOTTING,
     AGGREGATE_DATA_PATH,
-    plotting,
 )
 
 
@@ -82,7 +82,7 @@ def train_until_grok(
     criterion = nn.CrossEntropyLoss()
 
     # setup Plots
-    if plotting:
+    if PLOTTING:
         plt.ion()
         fig, ax1 = plt.subplots(1, 1, figsize=(8, 6))
 
@@ -120,7 +120,7 @@ def train_until_grok(
                 model_info.add_data_point(step, train_acc.item(), test_acc.item())
 
                 # live plot
-                if plotting:
+                if PLOTTING:
                     ax1.clear()
                     (steps_list, train_accs, test_accs) = model_info.get_data_lists()
                     ax1.plot(steps_list, train_accs, label='Train Acc')
@@ -135,7 +135,7 @@ def train_until_grok(
 
                 if test_acc > 97:
                     print("\nMODEL HAS GROKKED!")
-                    if plotting:
+                    if PLOTTING:
                         plt.ioff()
                         plt.show()
                     grokked = True
@@ -153,24 +153,21 @@ def train_until_grok(
 
 
 # start main loop: choose N for each sacrifice and train
-no_of_all_sacrifices = NUM_OF_WAVES * len(WEIGHT_DECAYS) * len(LEARNING_RATES) * (MAX_N - MIN_N + 1)
+num_N_values = ((MAX_N - MIN_N) // N_STEP) + 1
+no_of_all_sacrifices = NUM_OF_WAVES * len(WEIGHT_DECAYS) * len(LEARNING_RATES) * num_N_values
+
+model_no = 0
 for wave_index in range(NUM_OF_WAVES):
     for weight_decay in WEIGHT_DECAYS:
         for learning_rate in LEARNING_RATES:
-            for N in range(MIN_N, MAX_N + 1):
+            for N in range(MIN_N, MAX_N + 1, N_STEP):
                 """        
                 with open(DATA_FILE_PATH, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                 num_done = data.get('num_of_sacrifices', 0)
                 N = num_done + 3
                 """
-                model_no = (
-                    wave_index * len(WEIGHT_DECAYS) * len(LEARNING_RATES) * (MAX_N - MIN_N + 1)
-                    + WEIGHT_DECAYS.index(weight_decay) * len(LEARNING_RATES) * (MAX_N - MIN_N + 1)
-                    + LEARNING_RATES.index(learning_rate) * (MAX_N - MIN_N + 1)
-                    + (N - MIN_N)
-                    + 1
-                )
+                model_no += 1
                 # Build per-model directory once and pass it down.
                 wd_folder = str(weight_decay).replace('.', '_')
                 lr_folder = str(learning_rate).replace('.', '_')

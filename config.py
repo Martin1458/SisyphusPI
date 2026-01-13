@@ -66,6 +66,8 @@ NUM_OF_WAVES = 3
 MIN_N = 25
 # Maximum modulus N to try
 MAX_N = 30
+# Step size when sweeping N (1 = every N, 2 = every second N, ...)
+N_STEP = 1
 # Comma-separated list of weight decays to sweep over
 WEIGHT_DECAYS = 1.0, 0.1, 0.01
 # Comma-separated list of learning rates to sweep over
@@ -113,6 +115,7 @@ STEPS: int = _config.getint("model", "STEPS", fallback=10000)
 NUM_OF_WAVES: int = _config.getint("training", "NUM_OF_WAVES", fallback=3)
 MIN_N: int = _config.getint("training", "MIN_N", fallback=20)
 MAX_N: int = _config.getint("training", "MAX_N", fallback=200)
+N_STEP: int = _config.getint("training", "N_STEP", fallback=1)
 _wd_raw = _config.get("training", "WEIGHT_DECAYS", fallback=str(WEIGHT_DECAY))
 WEIGHT_DECAYS: list[float] = [float(x.strip()) for x in _wd_raw.split(",") if x.strip()]
 _lr_raw = _config.get("training", "LEARNING_RATES", fallback="0.005")
@@ -137,7 +140,5 @@ PLOTTING: bool = _config.getboolean("plot", "PLOTTING", fallback=False)
 
 # Aggregate JSON storing averaged stats across runs
 AGGREGATE_DATA_PATH: str = os.path.join(OUTPUT_DIR, "data.json")
-
-plotting: bool = PLOTTING
 
 
