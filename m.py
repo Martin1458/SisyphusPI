@@ -19,12 +19,42 @@ import numpy as np
 
 from sympy import prime
 
-# Change these paths to match current Python 3.13 installation folder
-tcl_path: str = r'C:\Users\marti\AppData\Local\Programs\Python\Python313\tcl\tcl8.6'
-tk_path: str = r'C:\Users\marti\AppData\Local\Programs\Python\Python313\tcl\tk8.6'
+secrets_path = os.path.join(os.path.dirname(__file__), 'secrets.ini')
 
-os.environ['TCL_LIBRARY'] = tcl_path
-os.environ['TK_LIBRARY'] = tk_path
+# Create a template secrets.ini on first run if it doesn't exist
+if not os.path.exists(secrets_path):
+    with open(secrets_path, 'w', encoding='utf-8') as f:
+        f.write(
+            """[paths]
+# Optional local overrides. This file is ignored by git.
+
+# Absolute path to your TCL library (optional)
+#TCL_PATH = C:\\path\\to\\python\\tcl\\tcl8.6
+
+# Absolute path to your TK library (optional)
+#TK_PATH = C:\\path\\to\\python\\tcl\\tk8.6
+
+# Absolute path to your output directory (optional)
+#OUTPUT_DIR = D:\\path\\to\\output\\SisyphusPI
+"""
+        )
+    print("Created template secrets.ini; edit it with your local paths if needed.")
+
+_secrets = configparser.ConfigParser()
+_secrets.read(secrets_path, encoding='utf-8')
+
+# TCL/TK paths can be provided via secrets.ini and are not hard-coded here
+if _secrets.has_section('paths'):
+    tcl_path = _secrets.get('paths', 'TCL_PATH', fallback=None)
+    tk_path = _secrets.get('paths', 'TK_PATH', fallback=None)
+else:
+    tcl_path = None
+    tk_path = None
+
+if tcl_path:
+    os.environ['TCL_LIBRARY'] = tcl_path
+if tk_path:
+    os.environ['TK_LIBRARY'] = tk_path
 
 
 # Model
@@ -62,7 +92,18 @@ WEIGHT_DECAYS: list[float] = [float(x.strip()) for x in _wd_raw.split(',') if x.
 _lr_raw = _config.get('training', 'LEARNING_RATES', fallback='0.005')
 LEARNING_RATES: list[float] = [float(x.strip()) for x in _lr_raw.split(',') if x.strip()]
 
-OUTPUT_DIR: str = _config.get('paths', 'OUTPUT_DIR', fallback='output')
+if _config.has_section('paths'):
+    _output_dir = _config.get('paths', 'OUTPUT_DIR', fallback='output')
+else:
+    _output_dir = 'output'
+OUTPUT_DIR: str = _output_dir
+
+# Allow secrets.ini to override OUTPUT_DIR without committing machine-specific paths
+_secrets_output_dir = None
+if _secrets.has_section('paths'):
+    _secrets_output_dir = _secrets.get('paths', 'OUTPUT_DIR', fallback=None)
+if _secrets_output_dir:
+    OUTPUT_DIR = _secrets_output_dir
 PLOTTING: bool = _config.getboolean('plot', 'PLOTTING', fallback=False)
 
 # Aggregate JSON storing averaged stats across runs
