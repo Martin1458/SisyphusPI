@@ -73,6 +73,10 @@ WEIGHT_DECAYS = 1.0, 0.1, 0.01
 # Comma-separated list of learning rates to sweep over
 LEARNING_RATES = 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1
 
+[project]
+# Logical name for this experiment; used to namespace output directories
+PROJECT_NAME = default_project
+
 [plot]
 # Whether to show live training plots
 PLOTTING = false
@@ -121,20 +125,23 @@ WEIGHT_DECAYS: list[float] = [float(x.strip()) for x in _wd_raw.split(",") if x.
 _lr_raw = _config.get("training", "LEARNING_RATES", fallback="0.005")
 LEARNING_RATES: list[float] = [float(x.strip()) for x in _lr_raw.split(",") if x.strip()]
 
+# Project name (namespaces all output for resumeable runs)
+PROJECT_NAME: str = _config.get("project", "PROJECT_NAME", fallback="default_project")
 
-# Output directory with optional override from secrets.ini
-_output_dir = "output"
+# Output directory base with optional override from secrets.ini
+_base_output_dir = "output"
 if _config.has_section("paths"):
-	_output_dir = _config.get("paths", "OUTPUT_DIR", fallback=_output_dir)
+	_base_output_dir = _config.get("paths", "OUTPUT_DIR", fallback=_base_output_dir)
 
 _secrets_output_dir: str | None = None
 if _secrets.has_section("paths"):
 	_secrets_output_dir = _secrets.get("paths", "OUTPUT_DIR", fallback=None)
 
 if _secrets_output_dir:
-	OUTPUT_DIR: str = _secrets_output_dir
-else:
-	OUTPUT_DIR = _output_dir
+	_base_output_dir = _secrets_output_dir
+
+# Final per-project output directory
+OUTPUT_DIR: str = os.path.join(_base_output_dir, PROJECT_NAME)
 
 PLOTTING: bool = _config.getboolean("plot", "PLOTTING", fallback=False)
 

@@ -152,6 +152,16 @@ def train_until_grok(
     return grokked
 
 
+# Determine resume point for this project based on aggregate data
+start_from = 0
+if os.path.exists(AGGREGATE_DATA_PATH):
+    try:
+        with open(AGGREGATE_DATA_PATH, "r", encoding="utf-8") as f:
+            agg_data = json.load(f)
+        start_from = int(agg_data.get("num_of_sacrifices", 0))
+    except Exception:
+        start_from = 0
+
 # start main loop: choose N for each sacrifice and train
 num_N_values = ((MAX_N - MIN_N) // N_STEP) + 1
 no_of_all_sacrifices = NUM_OF_WAVES * len(WEIGHT_DECAYS) * len(LEARNING_RATES) * num_N_values
@@ -161,13 +171,12 @@ for wave_index in range(NUM_OF_WAVES):
     for weight_decay in WEIGHT_DECAYS:
         for learning_rate in LEARNING_RATES:
             for N in range(MIN_N, MAX_N + 1, N_STEP):
-                """        
-                with open(DATA_FILE_PATH, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                num_done = data.get('num_of_sacrifices', 0)
-                N = num_done + 3
-                """
                 model_no += 1
+
+                # Skip models that were already completed in this project
+                if model_no <= start_from:
+                    continue
+
                 # Build per-model directory once and pass it down.
                 wd_folder = str(weight_decay).replace('.', '_')
                 lr_folder = str(learning_rate).replace('.', '_')

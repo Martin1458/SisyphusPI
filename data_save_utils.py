@@ -234,6 +234,69 @@ class ModelInfo:
         else:
             n_entry['avg_data']['steps_to_grok'] = 0
 
+        # ------------------------------------------------------------------
+        # Global aggregates grouped by weight decay and learning rate
+        # ------------------------------------------------------------------
+        # We scan all per-model JSON files under the aggregate data directory
+        # and compute simple statistics per weight decay and per learning rate.
+
+        weight_decay_stats: dict[str, dict[str, float | int]] = {}
+        learning_rate_stats: dict[str, dict[str, float | int]] = {}
+
+        if os.path.isdir(base_dir):
+            for root, _dirs, files in os.walk(base_dir):
+                for fname in files:
+                    if not fname.endswith('.json'):
+                        continue
+
+                    full_path = os.path.join(root, fname)
+                    # Skip the main aggregate data file itself.
+                    if os.path.normpath(full_path) == os.path.normpath(self.data_path):
+                        continue
+
+                    rel = os.path.relpath(full_path, base_dir)
+                    parts = rel.split(os.sep)
+                    # Expect structure: weight_decay/learning_rate/N/model.json
+                    if len(parts) < 4:
+                        continue
+                    wd_key, lr_key = parts[0], parts[1]
+
+                    try:
+                        with open(full_path, 'r', encoding='utf-8') as mf:
+                            m_data = json.load(mf)
+                    except (OSError, json.JSONDecodeError):
+                        continue
+
+                    train_time_val = float(m_data.get('train_time', 0.0))
+                    grokked_flag = 1 if m_data.get('grokked', 0) else 0
+
+                    # Update per-weight-decay stats (running average for train_time)
+                    wd_entry = weight_decay_stats.setdefault(
+                        wd_key,
+                        {'num_of_sacrifices': 0, 'num_of_grokked': 0, 'avg_train_time': 0.0},
+                    )
+                    wd_count = int(wd_entry['num_of_sacrifices']) + 1
+                    wd_prev_avg = float(wd_entry['avg_train_time'])
+                    wd_new_avg = wd_prev_avg + (train_time_val - wd_prev_avg) / wd_count
+                    wd_entry['num_of_sacrifices'] = wd_count
+                    wd_entry['num_of_grokked'] = int(wd_entry['num_of_grokked']) + grokked_flag
+                    wd_entry['avg_train_time'] = wd_new_avg
+
+                    # Update per-learning-rate stats
+                    lr_entry = learning_rate_stats.setdefault(
+                        lr_key,
+                        {'num_of_sacrifices': 0, 'num_of_grokked': 0, 'avg_train_time': 0.0},
+                    )
+                    lr_count = int(lr_entry['num_of_sacrifices']) + 1
+                    lr_prev_avg = float(lr_entry['avg_train_time'])
+                    lr_new_avg = lr_prev_avg + (train_time_val - lr_prev_avg) / lr_count
+                    lr_entry['num_of_sacrifices'] = lr_count
+                    lr_entry['num_of_grokked'] = int(lr_entry['num_of_grokked']) + grokked_flag
+                    lr_entry['avg_train_time'] = lr_new_avg
+
+        data['weight_decay'] = weight_decay_stats
+        data['learning_rate'] = learning_rate_stats
+
         self._write_json(self.data_path, data)
         format_json_number_lists(self.data_path)
 
