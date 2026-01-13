@@ -1,0 +1,3 @@
+[submodule "SisyphusPI-website"]
+	path = SisyphusPI-website
+	url = https://github.com/Martin1458/SisyphusPI-website.git
