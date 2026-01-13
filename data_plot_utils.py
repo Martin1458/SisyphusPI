@@ -13,6 +13,45 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
+def start_live_accuracy_plot() -> tuple[plt.Figure, plt.Axes]:
+	"""Initialize an interactive matplotlib figure/axes for live accuracy plots.
+
+	Returns (fig, ax) with interactive mode enabled.
+	"""
+
+	plt.ion()
+	fig, ax = plt.subplots(1, 1, figsize=(8, 6))
+	return fig, ax
+
+
+def update_live_accuracy_plot(ax: plt.Axes, model_info, step: int, pause: float = 0.1) -> None:
+	"""Update the live accuracy plot using data from ``model_info``.
+
+	``model_info`` is expected to provide ``get_data_lists()``, returning
+	(steps_list, train_accs, test_accs).
+	"""
+
+	steps_list, train_accs, test_accs = model_info.get_data_lists()
+	ax.clear()
+	ax.plot(steps_list, train_accs, label="Train Acc")
+	ax.plot(steps_list, test_accs, label="Test Acc (Grokking)")
+	ax.set_title(f"Accuracy Over Time (Step {step})")
+	ax.set_xlabel("Step")
+	ax.set_ylabel("Accuracy (%)")
+	ax.legend()
+	ax.grid(True, alpha=0.3)
+	plt.draw()
+	plt.pause(pause)
+
+
+def finalize_live_plot(block: bool = True) -> None:
+	"""Turn off interactive mode and optionally block with ``plt.show()``."""
+
+	plt.ioff()
+	if block:
+		plt.show()
+
+
 def _resolve_base_paths(data_path: str) -> str:
 	"""Return absolute path to a data file relative to this repo."""
 	return os.path.join(os.path.dirname(__file__), data_path)

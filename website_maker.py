@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+import subprocess
 
 from config import OUTPUT_DIR
 
@@ -210,5 +211,28 @@ def main() -> None:
   print(f"Wrote {index_path}")
 
 
+
 if __name__ == "__main__":
     main()
+
+def git_auto_commit_website(model_no: int, total_models: int) -> None:
+    """Git add/commit/push inside the SisyphusPI-website repo.
+
+    Best-effort: errors (no changes, no remote, no repo) are printed
+    but do not stop training.
+    """
+
+    repo_root = os.path.dirname(os.path.abspath(__file__))
+    website_repo = os.path.join(repo_root, "SisyphusPI-website")
+    msg = f"auto: updated site after {model_no}/{total_models} models"
+
+    if not os.path.isdir(website_repo):
+        print(f"Website repo not found at {website_repo}, skipping git push.")
+        return
+
+    try:
+        subprocess.run(["git", "add", "."], cwd=website_repo, check=False)
+        subprocess.run(["git", "commit", "-m", msg], cwd=website_repo, check=False)
+        subprocess.run(["git", "push"], cwd=website_repo, check=False)
+    except Exception as e:
+        print(f"Git auto-commit (website) failed: {e}")
