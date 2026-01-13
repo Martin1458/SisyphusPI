@@ -60,7 +60,6 @@ class ModelInfo:
     def save_model_info(self, grokked: bool):
         self.model_data['grokked'] = 1 if grokked else 0
         # Save per-model info in output/N/ folder
-        base_dir = os.path.dirname(self.data_path)
         n_dir = self.output_dir_path
         os.makedirs(n_dir, exist_ok=True)
         # Use number of files in n_dir as model_id
