@@ -12,49 +12,28 @@ import sys
 
 import data_gen_utils
 from data_save_utils import ModelInfo, format_json_number_lists
-import configparser
 
+import configparser
 from sklearn.metrics import confusion_matrix
 import numpy as np
-
 from sympy import prime
 
-secrets_path = os.path.join(os.path.dirname(__file__), 'secrets.ini')
-
-# Create a template secrets.ini on first run if it doesn't exist
-if not os.path.exists(secrets_path):
-    with open(secrets_path, 'w', encoding='utf-8') as f:
-        f.write(
-            """[paths]
-# Optional local overrides. This file is ignored by git.
-
-# Absolute path to your TCL library (optional)
-#TCL_PATH = C:\\path\\to\\python\\tcl\\tcl8.6
-
-# Absolute path to your TK library (optional)
-#TK_PATH = C:\\path\\to\\python\\tcl\\tk8.6
-
-# Absolute path to your output directory (optional)
-#OUTPUT_DIR = D:\\path\\to\\output\\SisyphusPI
-"""
-        )
-    print("Created template secrets.ini; edit it with your local paths if needed.")
-
-_secrets = configparser.ConfigParser()
-_secrets.read(secrets_path, encoding='utf-8')
-
-# TCL/TK paths can be provided via secrets.ini and are not hard-coded here
-if _secrets.has_section('paths'):
-    tcl_path = _secrets.get('paths', 'TCL_PATH', fallback=None)
-    tk_path = _secrets.get('paths', 'TK_PATH', fallback=None)
-else:
-    tcl_path = None
-    tk_path = None
-
-if tcl_path:
-    os.environ['TCL_LIBRARY'] = tcl_path
-if tk_path:
-    os.environ['TK_LIBRARY'] = tk_path
+from config import (
+    D_MODEL,
+    N_HEADS,
+    WEIGHT_DECAY,
+    TRAIN_PCT,
+    STEPS,
+    NUM_OF_WAVES,
+    MIN_N,
+    MAX_N,
+    WEIGHT_DECAYS,
+    LEARNING_RATES,
+    OUTPUT_DIR,
+    PLOTTING,
+    AGGREGATE_DATA_PATH,
+    plotting,
+)
 
 
 # Model
@@ -74,42 +53,6 @@ class NanoMath(nn.Module):
         x = self.embed(x.long()) + self.pos_embed
         x = self.transformer(x)
         return self.output_head(x[:, -1, :])
-
-_config = configparser.ConfigParser()
-_config.read(os.path.join(os.path.dirname(__file__), 'config.ini'), encoding='utf-8')
-
-D_MODEL: int = _config.getint('model', 'D_MODEL', fallback=128)
-N_HEADS: int = _config.getint('model', 'N_HEADS', fallback=4)
-WEIGHT_DECAY: float = _config.getfloat('model', 'WEIGHT_DECAY', fallback=1.0)
-TRAIN_PCT: float = _config.getfloat('model', 'TRAIN_PCT', fallback=0.4)
-STEPS: int = _config.getint('model', 'STEPS', fallback=10000)
-
-NUM_OF_WAVES: int = _config.getint('training', 'NUM_OF_WAVES', fallback=3)
-MIN_N: int = _config.getint('training', 'MIN_N', fallback=20)
-MAX_N: int = _config.getint('training', 'MAX_N', fallback=200)
-_wd_raw = _config.get('training', 'WEIGHT_DECAYS', fallback=str(WEIGHT_DECAY))
-WEIGHT_DECAYS: list[float] = [float(x.strip()) for x in _wd_raw.split(',') if x.strip()]
-_lr_raw = _config.get('training', 'LEARNING_RATES', fallback='0.005')
-LEARNING_RATES: list[float] = [float(x.strip()) for x in _lr_raw.split(',') if x.strip()]
-
-if _config.has_section('paths'):
-    _output_dir = _config.get('paths', 'OUTPUT_DIR', fallback='output')
-else:
-    _output_dir = 'output'
-OUTPUT_DIR: str = _output_dir
-
-# Allow secrets.ini to override OUTPUT_DIR without committing machine-specific paths
-_secrets_output_dir = None
-if _secrets.has_section('paths'):
-    _secrets_output_dir = _secrets.get('paths', 'OUTPUT_DIR', fallback=None)
-if _secrets_output_dir:
-    OUTPUT_DIR = _secrets_output_dir
-PLOTTING: bool = _config.getboolean('plot', 'PLOTTING', fallback=False)
-
-# Aggregate JSON storing averaged stats across runs
-AGGREGATE_DATA_PATH: str = os.path.join(OUTPUT_DIR, 'data.json')
-
-plotting: bool = PLOTTING
 
 import json
 
