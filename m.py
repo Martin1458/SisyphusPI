@@ -18,6 +18,9 @@ from sklearn.metrics import confusion_matrix
 import numpy as np
 from sympy import prime
 
+import website_maker
+import subprocess
+
 from config import (
     D_MODEL,
     N_HEADS,
@@ -55,6 +58,29 @@ class NanoMath(nn.Module):
         return self.output_head(x[:, -1, :])
 
 import json
+
+
+def git_auto_commit_website(model_no: int, total_models: int) -> None:
+    """Git add/commit/push inside the SisyphusPI-website repo.
+
+    Best-effort: errors (no changes, no remote, no repo) are printed
+    but do not stop training.
+    """
+
+    repo_root = os.path.dirname(os.path.abspath(__file__))
+    website_repo = os.path.join(repo_root, "SisyphusPI-website")
+    msg = f"auto: updated site after {model_no}/{total_models} models"
+
+    if not os.path.isdir(website_repo):
+        print(f"Website repo not found at {website_repo}, skipping git push.")
+        return
+
+    try:
+        subprocess.run(["git", "add", "."], cwd=website_repo, check=False)
+        subprocess.run(["git", "commit", "-m", msg], cwd=website_repo, check=False)
+        subprocess.run(["git", "push"], cwd=website_repo, check=False)
+    except Exception as e:
+        print(f"Git auto-commit (website) failed: {e}")
 
 
 def train_until_grok(
@@ -189,7 +215,15 @@ for wave_index in range(NUM_OF_WAVES):
                     'learning_rate': learning_rate,
                     'N': N,
                     'total_progress': f"{model_no/no_of_all_sacrifices:.2%}",
+                    'model_no': model_no,
                 }
                 train_until_grok(N, learning_rate, weight_decay, TRAIN_PCT, info, model_dir)
+
+                # Periodically regenerate the global HTML report using
+                # the website_maker main entrypoint.
+                if model_no % 10 == 0:
+                    print("Regenerating HTML report...")
+                    website_maker.main()
+                    git_auto_commit_website(model_no, no_of_all_sacrifices)
 
 print("All sacrifices complete.")

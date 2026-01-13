@@ -300,6 +300,109 @@ class ModelInfo:
         self._write_json(self.data_path, data)
         format_json_number_lists(self.data_path)
 
+        # Also maintain a global cross-project aggregate over all projects
+        # sharing the same base output directory. This builds averages for
+        # each (weight_decay, learning_rate) combination across all projects.
+        self._compute_all_projects_combinations_aggregate()
+
+    def _compute_all_projects_combinations_aggregate(self) -> None:
+        """Compute averages across all projects for each (wd, lr) combo.
+
+        Projects are assumed to live under a common base output directory
+        with structure:
+
+            base_output/
+                project_name_1/
+                    weight_decay/learning_rate/N/model.json
+                project_name_2/
+                    weight_decay/learning_rate/N/model.json
+
+        This method scans all such per-model JSON files and produces a
+        projects_data.json at the base_output/ level summarizing, for each
+        (weight_decay, learning_rate) pair across all projects:
+
+            - num_of_sacrifices
+            - num_of_grokked
+            - avg_train_time
+        """
+
+        # self.data_path: .../output/PROJECT_NAME/data.json
+        project_dir = os.path.dirname(self.data_path)
+        projects_root = os.path.dirname(project_dir)
+
+        if not os.path.isdir(projects_root):
+            return
+
+        combos_stats: dict[str, dict[str, dict[str, float | int]]] = {}
+        project_names: list[str] = []
+
+        for project_name in os.listdir(projects_root):
+            proj_path = os.path.join(projects_root, project_name)
+            if not os.path.isdir(proj_path):
+                continue
+
+            project_names.append(project_name)
+
+            for root, _dirs, files in os.walk(proj_path):
+                for fname in files:
+                    if not fname.endswith('.json'):
+                        continue
+
+                    full_path = os.path.join(root, fname)
+
+                    # We only care about per-model JSONs that live in the
+                    # weight_decay/learning_rate/N/ hierarchy. Skip the
+                    # project-level data.json at the project root.
+                    rel = os.path.relpath(full_path, proj_path)
+                    parts = rel.split(os.sep)
+                    if len(parts) < 4:
+                        continue
+
+                    wd_key, lr_key = parts[0], parts[1]
+
+                    try:
+                        with open(full_path, 'r', encoding='utf-8') as mf:
+                            m_data = json.load(mf)
+                    except (OSError, json.JSONDecodeError):
+                        continue
+
+                    train_time_val = float(m_data.get('train_time', 0.0))
+                    grokked_flag = 1 if m_data.get('grokked', 0) else 0
+
+                    # Nested dict: combos_stats[wd_key][lr_key] -> stats
+                    lr_dict = combos_stats.setdefault(wd_key, {})
+                    entry = lr_dict.setdefault(
+                        lr_key,
+                        {
+                            'num_of_sacrifices': 0,
+                            'num_of_grokked': 0,
+                            'avg_train_time': 0.0,
+                        },
+                    )
+
+                    count = int(entry['num_of_sacrifices']) + 1
+                    prev_avg = float(entry['avg_train_time'])
+                    new_avg = prev_avg + (train_time_val - prev_avg) / count
+
+                    entry['num_of_sacrifices'] = count
+                    entry['num_of_grokked'] = int(entry['num_of_grokked']) + grokked_flag
+                    entry['avg_train_time'] = new_avg
+
+        projects_data = {
+            'projects': project_names,
+            'combinations': combos_stats,
+        }
+
+        # Write a dedicated cross-project aggregate file. We keep the
+        # original projects_data.json name and also provide a more generic
+        # all_projects_data.json at the root output folder so you can treat
+        # it like a global data.json for all projects.
+        projects_data_path = os.path.join(projects_root, 'projects_data.json')
+        self._write_json(projects_data_path, projects_data)
+
+        all_projects_data_path = os.path.join(projects_root, 'all_projects_data.json')
+        self._write_json(all_projects_data_path, projects_data)
+
     def _initialize_data_file(self):
         """Ensure the aggregate data file exists, is structurally valid,
         and has zeroed entries for N=1 and N=2.
