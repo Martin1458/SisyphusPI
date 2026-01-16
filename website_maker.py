@@ -469,6 +469,53 @@ def git_auto_commit_website(model_no: int, total_models: int) -> None:
     try:
         subprocess.run(["git", "add", "."], cwd=website_repo, check=False)
         subprocess.run(["git", "commit", "-m", msg], cwd=website_repo, check=False)
-        subprocess.run(["git", "push"], cwd=website_repo, check=False)
+        # Detect current branch. If we're in detached HEAD, explicitly
+        # push HEAD to the remote's default branch (origin/HEAD), which
+        # avoids the "You are not currently on a branch" fatal.
+        head_proc = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            cwd=website_repo,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        current_branch = (head_proc.stdout or "").strip()
+
+        if head_proc.returncode != 0:
+            print("Could not determine current branch; skipping git push for website.")
+            return
+
+        if current_branch == "HEAD":
+            # We are in detached HEAD. Try to resolve origin/HEAD and
+            # push the new commit there.
+            origin_head_proc = subprocess.run(
+                ["git", "rev-parse", "--abbrev-ref", "origin/HEAD"],
+                cwd=website_repo,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            origin_head = (origin_head_proc.stdout or "").strip()
+
+            if origin_head_proc.returncode != 0 or not origin_head:
+                print(
+                    "Website repo is in detached HEAD and origin/HEAD is unknown; "
+                    "skipping git push for SisyphusPI-website."
+                )
+                return
+
+            if "/" in origin_head:
+                remote, remote_branch = origin_head.split("/", 1)
+            else:
+                remote, remote_branch = "origin", origin_head
+
+            subprocess.run(
+                ["git", "push", remote, f"HEAD:{remote_branch}"],
+                cwd=website_repo,
+                check=False,
+            )
+        else:
+            # Normal case: we're on a branch, so a plain push works.
+            subprocess.run(["git", "push"], cwd=website_repo, check=False)
     except Exception as e:
         print(f"Git auto-commit (website) failed: {e}")
