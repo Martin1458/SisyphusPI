@@ -12,7 +12,7 @@
         <xs:element name="N">
           <xs:complexType>
             <xs:sequence>
-              <!-- One entry per modulus N; attribute value holds the N (e.g. 3, 67) -->
+              <!-- One entry per modulus N; attribute value holds the N (e.g. 5, 10, 60) -->
               <xs:element name="entry" maxOccurs="unbounded" minOccurs="0">
                 <xs:complexType>
                   <xs:sequence>
@@ -23,7 +23,6 @@
                     <xs:element name="avg_data">
                       <xs:complexType>
                         <xs:sequence>
-                          <!-- Represent accuracy arrays as arbitrary text (e.g. space- or comma-separated numbers) -->
                           <xs:element name="train_acc" type="xs:string"/>
                           <xs:element name="test_acc" type="xs:string"/>
                           <xs:element name="steps_to_grok" type="xs:double"/>
@@ -33,20 +32,70 @@
 
                     <!-- Average training time (seconds) across sacrifices for this N -->
                     <xs:element name="avg_train_time" type="xs:double"/>
+                  </xs:sequence>
+                  <xs:attribute name="value" type="xs:int" use="required"/>
+                </xs:complexType>
+              </xs:element>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
 
-                    <!-- Optional legacy list of per-model times, if present after conversion -->
-                    <xs:element name="model_training_times" minOccurs="0">
+        <!-- Per-weight-decay aggregate stats -->
+        <xs:element name="weight_decay">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="entry" maxOccurs="unbounded" minOccurs="0">
+                <xs:complexType>
+                  <xs:sequence>
+                    <xs:element name="num_of_sacrifices" type="xs:nonNegativeInteger"/>
+                    <xs:element name="num_of_grokked" type="xs:nonNegativeInteger"/>
+                    <xs:element name="avg_train_time" type="xs:double"/>
+                  </xs:sequence>
+                  <xs:attribute name="key" type="xs:string" use="required"/>
+                </xs:complexType>
+              </xs:element>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+
+        <!-- Per-learning-rate aggregate stats -->
+        <xs:element name="learning_rate">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="entry" maxOccurs="unbounded" minOccurs="0">
+                <xs:complexType>
+                  <xs:sequence>
+                    <xs:element name="num_of_sacrifices" type="xs:nonNegativeInteger"/>
+                    <xs:element name="num_of_grokked" type="xs:nonNegativeInteger"/>
+                    <xs:element name="avg_train_time" type="xs:double"/>
+                  </xs:sequence>
+                  <xs:attribute name="key" type="xs:string" use="required"/>
+                </xs:complexType>
+              </xs:element>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+
+        <!-- Per (weight_decay, learning_rate) combination stats -->
+        <xs:element name="combinations">
+          <xs:complexType>
+            <xs:sequence>
+              <!-- Keyed by weight_decay, each containing learning_rate entries -->
+              <xs:element name="wd_group" maxOccurs="unbounded" minOccurs="0">
+                <xs:complexType>
+                  <xs:sequence>
+                    <xs:element name="lr_entry" maxOccurs="unbounded" minOccurs="0">
                       <xs:complexType>
                         <xs:sequence>
-                          <xs:element name="time" type="xs:double" maxOccurs="unbounded" minOccurs="0"/>
+                          <xs:element name="num_of_sacrifices" type="xs:nonNegativeInteger"/>
+                          <xs:element name="num_of_grokked" type="xs:nonNegativeInteger"/>
+                          <xs:element name="avg_train_time" type="xs:double"/>
                         </xs:sequence>
+                        <xs:attribute name="key" type="xs:string" use="required"/>
                       </xs:complexType>
                     </xs:element>
-
                   </xs:sequence>
-
-                  <!-- Attribute giving the numeric N for this entry (matches the string key in JSON) -->
-                  <xs:attribute name="value" type="xs:int" use="required"/>
+                  <xs:attribute name="key" type="xs:string" use="required"/>
                 </xs:complexType>
               </xs:element>
             </xs:sequence>

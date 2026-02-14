@@ -46,36 +46,29 @@ def _ensure_config_file(path: str) -> None:
 		f.write(
 			"""[model]
 # Hidden dimension
-D_MODEL = 128
-# Number of attention heads
-N_HEADS = 4
+D_MODELS = 128
+# Comma-separated list of attention head counts to sweep over
+N_HEADS_LIST = 4
 # Default weight decay (used if WEIGHT_DECAYS list is not set)
 WEIGHT_DECAY = 1.0
-# Fraction of data used for training (0.0 - 1.0)
-TRAIN_PCT = 0.4
+# Comma-separated list of training data fractions to sweep over (0.0 - 1.0)
+TRAIN_PCTS = 0.4
 # Maximum training steps per model
-STEPS = 100
+STEPS = 10000
 
 [training]
-# Informational; hook into loops if needed
-# Number of sacrifices per wave (deprecated)
-NUM_OF_SACRIFICES = 5
 # Number of waves of sacrifices to perform
-NUM_OF_WAVES = 3
+NUM_OF_WAVES = 5
 # Minimum modulus N to try
-MIN_N = 25
+MIN_N = 5
 # Maximum modulus N to try
-MAX_N = 30
+MAX_N = 60
 # Step size when sweeping N (1 = every N, 2 = every second N, ...)
-N_STEP = 1
+N_STEP = 5
 # Comma-separated list of weight decays to sweep over
-WEIGHT_DECAYS = 1.0, 0.1, 0.01
+WEIGHT_DECAYS = 0.01, 0.05, 0.1, 0.5, 1.0, 2.0
 # Comma-separated list of learning rates to sweep over
-LEARNING_RATES = 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1
-
-[project]
-# Logical name for this experiment; used to namespace output directories
-PROJECT_NAME = default_project
+LEARNING_RATES = 0.00005, 0.0001, 0.0005, 0.001, 0.005, 0.01, 0.05, 0.1
 
 [plot]
 # Whether to show live training plots
@@ -110,10 +103,20 @@ if TK_PATH:
 
 
 # Model and training hyperparameters from config.ini
-D_MODEL: int = _config.getint("model", "D_MODEL", fallback=128)
-N_HEADS: int = _config.getint("model", "N_HEADS", fallback=4)
+_dm_raw = _config.get("model", "D_MODELS", fallback="128")
+D_MODELS: list[int] = [int(x.strip()) for x in _dm_raw.split(",") if x.strip()]
+D_MODEL: int = D_MODELS[0]  # default scalar for backward compat
+
+_nh_raw = _config.get("model", "N_HEADS_LIST", fallback="4")
+N_HEADS_LIST: list[int] = [int(x.strip()) for x in _nh_raw.split(",") if x.strip()]
+N_HEADS: int = N_HEADS_LIST[0]  # default scalar for backward compat
+
 WEIGHT_DECAY: float = _config.getfloat("model", "WEIGHT_DECAY", fallback=1.0)
-TRAIN_PCT: float = _config.getfloat("model", "TRAIN_PCT", fallback=0.4)
+
+_tp_raw = _config.get("model", "TRAIN_PCTS", fallback="0.4")
+TRAIN_PCTS: list[float] = [float(x.strip()) for x in _tp_raw.split(",") if x.strip()]
+TRAIN_PCT: float = TRAIN_PCTS[0]  # default scalar for backward compat
+
 STEPS: int = _config.getint("model", "STEPS", fallback=10000)
 
 NUM_OF_WAVES: int = _config.getint("training", "NUM_OF_WAVES", fallback=3)
@@ -125,10 +128,7 @@ WEIGHT_DECAYS: list[float] = [float(x.strip()) for x in _wd_raw.split(",") if x.
 _lr_raw = _config.get("training", "LEARNING_RATES", fallback="0.005")
 LEARNING_RATES: list[float] = [float(x.strip()) for x in _lr_raw.split(",") if x.strip()]
 
-# Project name (namespaces all output for resumeable runs)
-PROJECT_NAME: str = _config.get("project", "PROJECT_NAME", fallback="default_project")
-
-# Output directory base with optional override from secrets.ini
+# Output directory with optional override from secrets.ini
 _base_output_dir = "output"
 if _config.has_section("paths"):
 	_base_output_dir = _config.get("paths", "OUTPUT_DIR", fallback=_base_output_dir)
@@ -140,12 +140,18 @@ if _secrets.has_section("paths"):
 if _secrets_output_dir:
 	_base_output_dir = _secrets_output_dir
 
-# Final per-project output directory
-OUTPUT_DIR: str = os.path.join(_base_output_dir, PROJECT_NAME)
+# Final output directory (flat — no project subdirectory)
+OUTPUT_DIR: str = _base_output_dir
 
 PLOTTING: bool = _config.getboolean("plot", "PLOTTING", fallback=False)
 
 # Aggregate JSON storing averaged stats across runs
 AGGREGATE_DATA_PATH: str = os.path.join(OUTPUT_DIR, "data.json")
 
+
+SMART_CONFIG = (
+    (MIN_N, MAX_N, N_STEP), NUM_OF_WAVES,
+    [D_MODELS, N_HEADS_LIST, TRAIN_PCTS, WEIGHT_DECAYS, LEARNING_RATES]
+    )
+SMART_LISTS_NAMES = ["D_MODELS", "N_HEADS_LIST", "TRAIN_PCTS", "WEIGHT_DECAYS", "LEARNING_RATES"]
 

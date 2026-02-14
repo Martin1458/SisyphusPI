@@ -3,15 +3,17 @@ import os
 from pathlib import Path
 import subprocess
 
-from config import OUTPUT_DIR
+from config import OUTPUT_DIR, AGGREGATE_DATA_PATH
 
 
-def build_html(all_data: dict) -> str:
-    projects = all_data.get("projects", [])
-    combos = all_data.get("combinations", {})
+def build_html(data: dict) -> str:
+    combos = data.get("combinations", {})
+    wd_stats = data.get("weight_decay", {})
+    lr_stats = data.get("learning_rate", {})
+    n_stats = data.get("N", {})
 
     # Optional system information (e.g. Raspberry Pi 5 CPU temperature)
-    system_info = all_data.get("system", {}) or {}
+    system_info = data.get("system", {}) or {}
     cpu_temp_c = system_info.get("cpu_temp_c")
 
     if cpu_temp_c is not None:
@@ -19,7 +21,7 @@ def build_html(all_data: dict) -> str:
     else:
         cpu_temp_text = "—"
 
-    # Flatten cross-project combinations for overview table/chart
+    # Flatten combinations for overview table/chart
     flat_rows: list[dict] = []
     for wd, lr_dict in combos.items():
         for lr, stats in lr_dict.items():
@@ -38,38 +40,34 @@ def build_html(all_data: dict) -> str:
                 }
             )
 
-    total_projects = len(projects)
     total_combos = len(flat_rows)
-    total_sacrifices = sum(r["num_of_sacrifices"] for r in flat_rows)
-    total_grokked = sum(r["num_of_grokked"] for r in flat_rows)
+    total_sacrifices = int(data.get("num_of_sacrifices", 0))
+    total_grokked = int(data.get("num_of_grokked", 0))
+    overall_grok_rate = (total_grokked / total_sacrifices * 100.0) if total_sacrifices > 0 else 0.0
 
-    embedded_json = json.dumps(all_data, ensure_ascii=False)
+    embedded_json = json.dumps(data, ensure_ascii=False)
     html = f"""<!DOCTYPE html>
 <html lang=\"en\">
 <head>
     <meta charset=\"UTF-8\" />
-    <title>SisyphusPI Project Overview</title>
+    <title>SisyphusPI</title>
     <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
     <link rel=\"stylesheet\" href=\"styles.css\" />
     <script src=\"https://cdn.jsdelivr.net/npm/chart.js\"></script>
 </head>
 <body>
     <div class=\"cpu-temp\">CPU: {cpu_temp_text}</div>
-    <h1>SisyphusPI – Projects</h1>
+    <h1>SisyphusPI</h1>
 
     <div class=\"tabs\">
         <button class=\"tab-button active\" data-tab=\"overview\">Overview</button>
-        <button class=\"tab-button\" data-tab=\"project\">Project</button>
+        <button class=\"tab-button\" data-tab=\"drilldown\">Drilldown</button>
     </div>
 
     <div id=\"tab-overview\" class=\"tab-panel active\">
         <div class=\"card\">
             <h2>Summary</h2>
             <div class=\"metrics\">
-                <div class=\"metric\">
-                    <div class=\"metric-label\">Projects</div>
-                    <div class=\"metric-value\">{total_projects}</div>
-                </div>
                 <div class=\"metric\">
                     <div class=\"metric-label\">(wd, lr) Combos</div>
                     <div class=\"metric-value\">{total_combos}</div>
@@ -82,8 +80,11 @@ def build_html(all_data: dict) -> str:
                     <div class=\"metric-label\">Total Grokked</div>
                     <div class=\"metric-value\">{total_grokked}</div>
                 </div>
+                <div class=\"metric\">
+                    <div class=\"metric-label\">Grok Rate</div>
+                    <div class=\"metric-value\">{overall_grok_rate:.1f}%</div>
+                </div>
             </div>
-            <p>Projects: {', '.join(projects) or '—'}</p>
         </div>
 
         <div class=\"card\">
@@ -127,263 +128,253 @@ def build_html(all_data: dict) -> str:
         </div>
     </div>
 
-    <div id=\"tab-project\" class=\"tab-panel\">
-        <div class=\"card\">
-            <h2>Project selection</h2>
-            <label for=\"project-select\">Choose project:</label>
-            <select id=\"project-select\"></select>
-        </div>
-
-        <div id=\"project-summary-card\" class=\"card\">
-            <h2>Project summary</h2>
-            <p>Select a project to see details.</p>
-        </div>
-
+    <div id=\"tab-drilldown\" class=\"tab-panel\">
         <div class=\"card\">
             <h2>Grokked % by weight_decay</h2>
-            <canvas id=\"projectWdChart\" height=\"120\"></canvas>
+            <canvas id=\"wdChart\" height=\"120\"></canvas>
         </div>
 
         <div class=\"card\">
             <h2>Grokked % by learning_rate</h2>
-            <canvas id=\"projectLrChart\" height=\"120\"></canvas>
+            <canvas id=\"lrChart\" height=\"120\"></canvas>
+        </div>
+
+        <div class=\"card\">
+            <h2>Filter by weight_decay</h2>
+            <label for=\"wd-select\">Choose weight_decay:</label>
+            <select id=\"wd-select\"></select>
+            <canvas id=\"wdDrillChart\" height=\"120\" style=\"margin-top:1rem\"></canvas>
+        </div>
+
+        <div class=\"card\">
+            <h2>Filter by learning_rate</h2>
+            <label for=\"lr-select\">Choose learning_rate:</label>
+            <select id=\"lr-select\"></select>
+            <canvas id=\"lrDrillChart\" height=\"120\" style=\"margin-top:1rem\"></canvas>
+        </div>
+
+        <div class=\"card\">
+            <h2>Per-N Statistics</h2>
+            <div class=\"table-wrapper\">
+                <table id=\"n-stats-table\">
+                    <thead>
+                        <tr>
+                            <th>N</th>
+                            <th>Sacrifices</th>
+                            <th>Grokked</th>
+                            <th>Grok %</th>
+                            <th>Avg Train Time (s)</th>
+                            <th>Median Steps to Grok</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+"""
+
+    # Insert per-N table rows
+    sorted_n_keys = sorted(
+        [k for k in n_stats.keys() if k not in ("1", "2") or n_stats[k].get("num_of_sacrifices", 0) > 0],
+        key=lambda x: int(x),
+    )
+    for n_key in sorted_n_keys:
+        n_entry = n_stats[n_key]
+        n_sac = int(n_entry.get("num_of_sacrifices", 0))
+        n_grok = int(n_entry.get("num_of_grokked", 0))
+        n_rate = (n_grok / n_sac * 100.0) if n_sac > 0 else 0.0
+        n_avg_time = float(n_entry.get("avg_train_time", 0.0))
+        n_steps_grok = n_entry.get("avg_data", {}).get("steps_to_grok", 0)
+        if n_sac > 0:
+            html += (
+                f"          <tr>"
+                f"<td>{n_key}</td>"
+                f"<td>{n_sac}</td>"
+                f"<td>{n_grok}</td>"
+                f"<td>{n_rate:.1f}</td>"
+                f"<td>{n_avg_time:.2f}</td>"
+                f"<td>{n_steps_grok}</td>"
+                f"</tr>\n"
+            )
+
+    html += """        </tbody>
+                </table>
+            </div>
         </div>
     </div>
 
-    <script id=\"all-projects-data\" type=\"application/json\">""" + embedded_json + """</script>
+    <script id=\"sisyphus-data\" type=\"application/json\">""" + embedded_json + """</script>
     <script>
         (function() {
-            const script = document.getElementById('all-projects-data');
+            const script = document.getElementById('sisyphus-data');
             if (!script) return;
             const data = JSON.parse(script.textContent || '{}');
             const combos = data.combinations || {};
-            const projects = data.projects || [];
-            const projectDetails = data.project_details || {};
+            const wdStats = data.weight_decay || {};
+            const lrStats = data.learning_rate || {};
 
-            // ---------------- Overview chart ----------------
-            const overviewLabels = [];
-            const overviewRates = [];
-
-            for (const [wd, lrDict] of Object.entries(combos)) {
-                for (const [lr, stats] of Object.entries(lrDict)) {
-                    const numSac = stats.num_of_sacrifices || 0;
-                    const numGrok = stats.num_of_grokked || 0;
-                    const rate = numSac > 0 ? (numGrok / numSac * 100.0) : 0.0;
-                    overviewLabels.push(`${wd} / ${lr}`);
-                    overviewRates.push(rate);
-                }
+            // ---- Helper: compute grok rate ----
+            function grokRate(s) {
+                const n = (s && s.num_of_sacrifices) || 0;
+                const g = (s && s.num_of_grokked) || 0;
+                return n > 0 ? (g / n * 100.0) : 0.0;
             }
 
+            // ---- Chart defaults ----
+            const barOpts = (yLabel) => ({
+                responsive: true, maintainAspectRatio: true, animation: false,
+                scales: {
+                    y: { beginAtZero: true, max: 100, title: { display: true, text: yLabel } },
+                    x: { ticks: { autoSkip: true, maxTicksLimit: 16 } },
+                },
+            });
+
+            // ---- Overview: combo chart ----
+            const overviewLabels = [];
+            const overviewRates = [];
+            for (const [wd, lrDict] of Object.entries(combos)) {
+                for (const [lr, stats] of Object.entries(lrDict)) {
+                    overviewLabels.push(`${wd} / ${lr}`);
+                    overviewRates.push(grokRate(stats));
+                }
+            }
             const comboCanvas = document.getElementById('comboChart');
             if (comboCanvas) {
-                const ctx = comboCanvas.getContext('2d');
-                // eslint-disable-next-line no-undef
-                new Chart(ctx, {
+                new Chart(comboCanvas.getContext('2d'), {
                     type: 'bar',
                     data: {
                         labels: overviewLabels,
-                        datasets: [{
-                            label: 'Grokked %',
-                            data: overviewRates,
+                        datasets: [{ label: 'Grokked %', data: overviewRates,
                             backgroundColor: 'rgba(123, 215, 255, 0.4)',
-                            borderColor: 'rgba(123, 215, 255, 1.0)',
-                            borderWidth: 1,
-                        }],
+                            borderColor: 'rgba(123, 215, 255, 1.0)', borderWidth: 1 }],
                     },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: true,
-                        animation: false,
-                        scales: {
-                            y: {
-                                beginAtZero: true,
-                                max: 100,
-                                title: { display: true, text: 'Grokked %' },
-                            },
-                            x: {
-                                ticks: { autoSkip: true, maxTicksLimit: 12 },
-                            },
-                        },
-                    },
+                    options: barOpts('Grokked %'),
                 });
             }
 
-            // ---------------- Tabs behaviour ----------------
-            const tabButtons = document.querySelectorAll('.tab-button');
-            const tabPanels = document.querySelectorAll('.tab-panel');
-
-            tabButtons.forEach((btn) => {
+            // ---- Tabs ----
+            document.querySelectorAll('.tab-button').forEach((btn) => {
                 btn.addEventListener('click', () => {
                     const target = btn.getAttribute('data-tab');
                     if (!target) return;
-
-                    tabButtons.forEach((b) => b.classList.remove('active'));
-                    tabPanels.forEach((panel) => panel.classList.remove('active'));
-
+                    document.querySelectorAll('.tab-button').forEach((b) => b.classList.remove('active'));
+                    document.querySelectorAll('.tab-panel').forEach((p) => p.classList.remove('active'));
                     btn.classList.add('active');
-                    const activePanel = document.getElementById(`tab-${target}`);
-                    if (activePanel) {
-                        activePanel.classList.add('active');
-                    }
+                    const panel = document.getElementById(`tab-${target}`);
+                    if (panel) panel.classList.add('active');
                 });
             });
 
-            // ---------------- Project view ----------------
-            const projectSelect = document.getElementById('project-select');
-            const projectSummaryCard = document.getElementById('project-summary-card');
-            const projectWdCanvas = document.getElementById('projectWdChart');
-            const projectLrCanvas = document.getElementById('projectLrChart');
-
-            let projectWdChart = null;
-            let projectLrChart = null;
-
-            function renderProjectSummary(name) {
-                if (!projectSummaryCard) return;
-                const details = projectDetails[name];
-                if (!details) {
-                    projectSummaryCard.innerHTML = '<h2>Project summary</h2><p>No data for this project yet.</p>';
-                    return;
-                }
-
-                const numSac = details.num_of_sacrifices || 0;
-                const numGrok = details.num_of_grokked || 0;
-                const grokRate = numSac > 0 ? (numGrok / numSac * 100.0) : 0.0;
-
-                projectSummaryCard.innerHTML = `
-                    <h2>Project: ${name}</h2>
-                    <div class="metrics">
-                        <div class="metric">
-                            <div class="metric-label">Sacrifices</div>
-                            <div class="metric-value">${numSac}</div>
-                        </div>
-                        <div class="metric">
-                            <div class="metric-label">Grokked</div>
-                            <div class="metric-value">${numGrok}</div>
-                        </div>
-                        <div class="metric">
-                            <div class="metric-label">Grokked %</div>
-                            <div class="metric-value">${grokRate.toFixed(1)}</div>
-                        </div>
-                    </div>
-                `;
-            }
-
-            function renderProjectCharts(name) {
-                const details = projectDetails[name];
-                if (!details) return;
-
-                const wdStats = details.weight_decay || {};
-                const lrStats = details.learning_rate || {};
-
-                if (projectWdChart) {
-                    projectWdChart.destroy();
-                    projectWdChart = null;
-                }
-                if (projectLrChart) {
-                    projectLrChart.destroy();
-                    projectLrChart = null;
-                }
-
-                if (projectWdCanvas) {
-                    const wdLabels = Object.keys(wdStats).sort();
-                    const wdRates = wdLabels.map((wd) => {
-                        const s = wdStats[wd] || {};
-                        const numSac = s.num_of_sacrifices || 0;
-                        const numGrok = s.num_of_grokked || 0;
-                        return numSac > 0 ? (numGrok / numSac * 100.0) : 0.0;
-                    });
-
-                    const ctxWd = projectWdCanvas.getContext('2d');
-                    // eslint-disable-next-line no-undef
-                    projectWdChart = new Chart(ctxWd, {
-                        type: 'bar',
-                        data: {
-                            labels: wdLabels,
-                            datasets: [{
-                                label: 'Grokked %',
-                                data: wdRates,
-                                backgroundColor: 'rgba(180, 123, 255, 0.4)',
-                                borderColor: 'rgba(180, 123, 255, 1.0)',
-                                borderWidth: 1,
-                            }],
-                        },
-                        options: {
-                            responsive: true,
-                            maintainAspectRatio: true,
-                            animation: false,
-                            scales: {
-                                y: {
-                                    beginAtZero: true,
-                                    max: 100,
-                                    title: { display: true, text: 'Grokked %' },
-                                },
-                            },
-                        },
-                    });
-                }
-
-                if (projectLrCanvas) {
-                    const lrLabels = Object.keys(lrStats).sort();
-                    const lrRates = lrLabels.map((lr) => {
-                        const s = lrStats[lr] || {};
-                        const numSac = s.num_of_sacrifices || 0;
-                        const numGrok = s.num_of_grokked || 0;
-                        return numSac > 0 ? (numGrok / numSac * 100.0) : 0.0;
-                    });
-
-                    const ctxLr = projectLrCanvas.getContext('2d');
-                    // eslint-disable-next-line no-undef
-                    projectLrChart = new Chart(ctxLr, {
-                        type: 'bar',
-                        data: {
-                            labels: lrLabels,
-                            datasets: [{
-                                label: 'Grokked %',
-                                data: lrRates,
-                                backgroundColor: 'rgba(123, 255, 196, 0.4)',
-                                borderColor: 'rgba(123, 255, 196, 1.0)',
-                                borderWidth: 1,
-                            }],
-                        },
-                        options: {
-                            responsive: true,
-                            maintainAspectRatio: true,
-                            animation: false,
-                            scales: {
-                                y: {
-                                    beginAtZero: true,
-                                    max: 100,
-                                    title: { display: true, text: 'Grokked %' },
-                                },
-                            },
-                        },
-                    });
-                }
-            }
-
-            function handleProjectChange() {
-                if (!projectSelect) return;
-                const name = projectSelect.value;
-                if (!name) return;
-                renderProjectSummary(name);
-                renderProjectCharts(name);
-            }
-
-            if (projectSelect && Array.isArray(projects)) {
-                projectSelect.innerHTML = '';
-                projects.slice().sort().forEach((name) => {
-                    const opt = document.createElement('option');
-                    opt.value = name;
-                    opt.textContent = name;
-                    projectSelect.appendChild(opt);
+            // ---- Drilldown: WD chart ----
+            const wdCanvas = document.getElementById('wdChart');
+            if (wdCanvas) {
+                const wdLabels = Object.keys(wdStats).sort();
+                const wdRates = wdLabels.map((k) => grokRate(wdStats[k]));
+                new Chart(wdCanvas.getContext('2d'), {
+                    type: 'bar',
+                    data: {
+                        labels: wdLabels,
+                        datasets: [{ label: 'Grokked %', data: wdRates,
+                            backgroundColor: 'rgba(180, 123, 255, 0.4)',
+                            borderColor: 'rgba(180, 123, 255, 1.0)', borderWidth: 1 }],
+                    },
+                    options: barOpts('Grokked %'),
                 });
+            }
 
-                projectSelect.addEventListener('change', handleProjectChange);
+            // ---- Drilldown: LR chart ----
+            const lrCanvas = document.getElementById('lrChart');
+            if (lrCanvas) {
+                const lrLabels = Object.keys(lrStats).sort();
+                const lrRates = lrLabels.map((k) => grokRate(lrStats[k]));
+                new Chart(lrCanvas.getContext('2d'), {
+                    type: 'bar',
+                    data: {
+                        labels: lrLabels,
+                        datasets: [{ label: 'Grokked %', data: lrRates,
+                            backgroundColor: 'rgba(123, 255, 196, 0.4)',
+                            borderColor: 'rgba(123, 255, 196, 1.0)', borderWidth: 1 }],
+                    },
+                    options: barOpts('Grokked %'),
+                });
+            }
 
-                if (projectSelect.options.length > 0) {
-                    projectSelect.selectedIndex = 0;
-                    handleProjectChange();
+            // ---- Drilldown: filter by WD → show LR breakdown ----
+            const wdSelect = document.getElementById('wd-select');
+            const wdDrillCanvas = document.getElementById('wdDrillChart');
+            let wdDrillChart = null;
+
+            function renderWdDrill(wd) {
+                if (wdDrillChart) { wdDrillChart.destroy(); wdDrillChart = null; }
+                const lrDict = combos[wd];
+                if (!lrDict || !wdDrillCanvas) return;
+                const labels = Object.keys(lrDict).sort();
+                const rates = labels.map((lr) => grokRate(lrDict[lr]));
+                wdDrillChart = new Chart(wdDrillCanvas.getContext('2d'), {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{ label: `Grokked % (wd=${wd})`, data: rates,
+                            backgroundColor: 'rgba(255, 180, 123, 0.4)',
+                            borderColor: 'rgba(255, 180, 123, 1.0)', borderWidth: 1 }],
+                    },
+                    options: barOpts('Grokked %'),
+                });
+            }
+
+            if (wdSelect) {
+                const wdKeys = Object.keys(combos).sort();
+                wdKeys.forEach((wd) => {
+                    const opt = document.createElement('option');
+                    opt.value = wd; opt.textContent = wd;
+                    wdSelect.appendChild(opt);
+                });
+                wdSelect.addEventListener('change', () => renderWdDrill(wdSelect.value));
+                if (wdKeys.length > 0) { wdSelect.value = wdKeys[0]; renderWdDrill(wdKeys[0]); }
+            }
+
+            // ---- Drilldown: filter by LR → show WD breakdown ----
+            const lrSelect = document.getElementById('lr-select');
+            const lrDrillCanvas = document.getElementById('lrDrillChart');
+            let lrDrillChart = null;
+
+            function renderLrDrill(lr) {
+                if (lrDrillChart) { lrDrillChart.destroy(); lrDrillChart = null; }
+                if (!lrDrillCanvas) return;
+                // Collect all WDs that have this LR
+                const wdKeys = Object.keys(combos).sort();
+                const labels = [];
+                const rates = [];
+                for (const wd of wdKeys) {
+                    const lrDict = combos[wd] || {};
+                    if (lr in lrDict) {
+                        labels.push(wd);
+                        rates.push(grokRate(lrDict[lr]));
+                    }
                 }
+                lrDrillChart = new Chart(lrDrillCanvas.getContext('2d'), {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{ label: `Grokked % (lr=${lr})`, data: rates,
+                            backgroundColor: 'rgba(255, 123, 180, 0.4)',
+                            borderColor: 'rgba(255, 123, 180, 1.0)', borderWidth: 1 }],
+                    },
+                    options: barOpts('Grokked %'),
+                });
+            }
+
+            if (lrSelect) {
+                // Collect all unique LR keys across all WDs
+                const allLrs = new Set();
+                for (const lrDict of Object.values(combos)) {
+                    for (const lr of Object.keys(lrDict)) allLrs.add(lr);
+                }
+                const lrKeys = [...allLrs].sort();
+                lrKeys.forEach((lr) => {
+                    const opt = document.createElement('option');
+                    opt.value = lr; opt.textContent = lr;
+                    lrSelect.appendChild(opt);
+                });
+                lrSelect.addEventListener('change', () => renderLrDrill(lrSelect.value));
+                if (lrKeys.length > 0) { lrSelect.value = lrKeys[0]; renderLrDrill(lrKeys[0]); }
             }
         })();
     </script>
@@ -394,53 +385,20 @@ def build_html(all_data: dict) -> str:
 
 
 def main() -> None:
-    # OUTPUT_DIR is project-specific (output/project_name).
-    # all_projects_data.json lives under the shared output/ folder,
-    # and we write the website to SisyphusPI-website/index.html at
-    # the repository root.
+    """Read the aggregate data.json and generate the website HTML."""
     output_dir = Path(OUTPUT_DIR).resolve()
-    projects_root = output_dir.parent  # e.g. .../SisyphusPI/output
-    repo_root = projects_root.parent   # e.g. .../SisyphusPI
+    repo_root = output_dir.parent  # e.g. .../SisyphusPI
 
-    all_projects_data_path = projects_root / "all_projects_data.json"
+    data_path = Path(AGGREGATE_DATA_PATH).resolve()
 
-    if not all_projects_data_path.is_file():
-        print(f"No all_projects_data.json found at {all_projects_data_path}. Run training first.")
+    if not data_path.is_file():
+        print(f"No data.json found at {data_path}. Run training first.")
         return
 
-    with all_projects_data_path.open("r", encoding="utf-8") as f:
-        all_data = json.load(f)
+    with data_path.open("r", encoding="utf-8") as f:
+        data = json.load(f)
 
-    # Enrich with per-project aggregates for the Project tab.
-    # For each project, we read its project-level data.json (if present)
-    # and expose total sacrifices/grokked plus per-weight-decay and
-    # per-learning-rate stats.
-    project_details: dict[str, dict] = {}
-    for project_name in all_data.get("projects", []):
-        proj_data_path = projects_root / project_name / "data.json"
-        if not proj_data_path.is_file():
-            continue
-        try:
-            with proj_data_path.open("r", encoding="utf-8") as pf:
-                proj_data = json.load(pf)
-        except json.JSONDecodeError:
-            continue
-
-        num_sac = int(proj_data.get("num_of_sacrifices", 0))
-        num_grok = int(proj_data.get("num_of_grokked", 0))
-        wd_stats = proj_data.get("weight_decay", {}) or {}
-        lr_stats = proj_data.get("learning_rate", {}) or {}
-
-        project_details[project_name] = {
-            "num_of_sacrifices": num_sac,
-            "num_of_grokked": num_grok,
-            "weight_decay": wd_stats,
-            "learning_rate": lr_stats,
-        }
-
-    all_data["project_details"] = project_details
-
-    html = build_html(all_data)
+    html = build_html(data)
     index_path = repo_root / "SisyphusPI-website" / "index.html"
     index_path.parent.mkdir(parents=True, exist_ok=True)
     index_path.write_text(html, encoding="utf-8")

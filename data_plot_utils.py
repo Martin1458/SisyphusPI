@@ -2,15 +2,72 @@ import json
 import os
 from typing import Optional
 
-# Ensure Tcl/Tk paths are correctly set for matplotlib's Tk backend
-tcl_path: str = r"C:\Users\marti\AppData\Local\Programs\Python\Python313\tcl\tcl8.6"
-tk_path: str = r"C:\Users\marti\AppData\Local\Programs\Python\Python313\tcl\tk8.6"
-
-os.environ["TCL_LIBRARY"] = tcl_path
-os.environ["TK_LIBRARY"] = tk_path
+# TCL/TK paths are set by config.py at import time via secrets.ini.
+# Import config to ensure environment is configured before matplotlib.
+import config as _config  # noqa: F401
 
 import matplotlib.pyplot as plt
 import numpy as np
+
+from stepping_utils import get_param_values, state_to_model_dir, _INFO_KEYS
+from config import SMART_CONFIG, SMART_LISTS_NAMES
+
+# Default paths derived from config
+_DEFAULT_DATA_PATH: str = _config.AGGREGATE_DATA_PATH
+_DEFAULT_BASE_DIR: str = _config.OUTPUT_DIR
+
+
+# ---------------------------------------------------------------------------
+# Helpers for discovering model JSON files in the nested directory tree.
+# ---------------------------------------------------------------------------
+
+def _find_model_files_for_N(N: int, base_dir: str | None = None) -> list[str]:
+	"""Walk the output tree and return all .json model files whose
+	immediate parent directory matches ``str(N)``."""
+	base_path = os.path.join(os.path.dirname(__file__), base_dir or _DEFAULT_BASE_DIR)
+	results: list[str] = []
+	if not os.path.isdir(base_path):
+		return results
+	n_str = str(N)
+	for root, _dirs, files in os.walk(base_path):
+		if os.path.basename(root) != n_str:
+			continue
+		for fname in files:
+			if fname.endswith(".json"):
+				results.append(os.path.join(root, fname))
+	return results
+
+
+def _find_model_files_for_state(state: tuple, base_dir: str | None = None) -> list[str]:
+	"""Return all .json model files in the exact directory for a state tuple."""
+	model_dir = state_to_model_dir(state)
+	if not os.path.isdir(model_dir):
+		return []
+	return [
+		os.path.join(model_dir, f)
+		for f in os.listdir(model_dir)
+		if f.endswith(".json")
+	]
+
+
+def _find_all_model_files(base_dir: str | None = None) -> list[tuple[str, str]]:
+	"""Walk the output tree and return (parent_N_str, full_path) for every
+	model .json file, where parent_N_str is the leaf directory name (N)."""
+	base_path = os.path.join(os.path.dirname(__file__), base_dir or _DEFAULT_BASE_DIR)
+	results: list[tuple[str, str]] = []
+	if not os.path.isdir(base_path):
+		return results
+	for root, _dirs, files in os.walk(base_path):
+		json_files = [f for f in files if f.endswith(".json")]
+		if not json_files:
+			continue
+		leaf = os.path.basename(root)
+		# Only include if the leaf dir looks like an integer N
+		if not leaf.isdigit():
+			continue
+		for fname in json_files:
+			results.append((leaf, os.path.join(root, fname)))
+	return results
 
 
 def start_live_accuracy_plot() -> tuple[plt.Figure, plt.Axes]:
@@ -59,7 +116,7 @@ def _resolve_base_paths(data_path: str) -> str:
 
 def plot_avg_for_N(
 	N: int,
-	data_path: str = r"output\data.json",
+	data_path: str | None = None,
 	show: bool = True,
 	ax: Optional[plt.Axes] = None,
 ) -> None:
@@ -69,7 +126,7 @@ def plot_avg_for_N(
 	Curves are indexed by step number (0, 1, 2, ...).
 	"""
 
-	abs_path = _resolve_base_paths(data_path)
+	abs_path = _resolve_base_paths(data_path or _DEFAULT_DATA_PATH)
 
 	if not os.path.exists(abs_path):
 		raise FileNotFoundError(f"Aggregate data file not found: {abs_path}")
@@ -109,7 +166,8 @@ def plot_avg_for_N(
 def plot_model_for_N(
 	N: int,
 	model_id: int,
-	base_dir: str = "output",
+	state: tuple | None = None,
+	base_dir: str | None = None,
 	show: bool = True,
 	ax: Optional[plt.Axes] = None,
 ) -> None:
@@ -118,15 +176,26 @@ def plot_model_for_N(
 	Parameters
 	----------
 	N : int
-		Modulus; used as the subdirectory name under base_dir.
+		Modulus value.
 	model_id : int
 		JSON file name without extension (e.g. 0.json -> model_id=0).
+	state : tuple, optional
+		State tuple to pinpoint an exact parameter combination directory.
+		If None, walks the tree and finds the first match.
 	base_dir : str, optional
 		Root directory where per-model JSON files are stored (default "output").
 	"""
 
-	models_dir = _resolve_base_paths(os.path.join(base_dir, str(N)))
-	model_path = os.path.join(models_dir, f"{model_id}.json")
+	if state is not None:
+		model_dir = state_to_model_dir(state)
+	else:
+		# Fall back to scanning the tree for the first directory for this N
+		files = _find_model_files_for_N(N, base_dir)
+		if not files:
+			raise FileNotFoundError(f"No model files found for N={N}")
+		model_dir = os.path.dirname(files[0])
+
+	model_path = os.path.join(model_dir, f"{model_id}.json")
 
 	if not os.path.exists(model_path):
 		raise FileNotFoundError(f"Model file not found: {model_path}")
@@ -158,30 +227,30 @@ def plot_model_for_N(
 		plt.show()
 
 
-def plot_all_models_for_N(N: int, base_dir: str = "output") -> None:
+def plot_all_models_for_N(N: int, state: tuple | None = None, base_dir: str | None = None) -> None:
 	"""Overlay all saved *test* curves for a given N on one graph.
 
-	Uses the JSON files in output/N/. Each model contributes one test curve.
+	Walks the output tree to find all model JSON files for this N.
+	If ``state`` is provided, only plots models from that exact parameter combo.
 	"""
 
-	models_dir = _resolve_base_paths(os.path.join(base_dir, str(N)))
-	if not os.path.isdir(models_dir):
-		raise FileNotFoundError(f"No directory for N={N}: {models_dir}")
+	if state is not None:
+		model_files_paths = _find_model_files_for_state(state, base_dir)
+	else:
+		model_files_paths = _find_model_files_for_N(N, base_dir)
 
-	model_files = [f for f in os.listdir(models_dir) if f.endswith(".json")]
-	if not model_files:
-		raise ValueError(f"No model JSON files found for N={N} in {models_dir}")
+	if not model_files_paths:
+		raise FileNotFoundError(f"No model JSON files found for N={N}")
 
-	def _model_id_from_name(name: str) -> int:
-		return int(os.path.splitext(name)[0])
+	def _model_id_from_path(path: str) -> int:
+		return int(os.path.splitext(os.path.basename(path))[0])
 
 	_, ax = plt.subplots(1, 1, figsize=(8, 6))
 	base_step = None
 	step_size = None
 
-	for fname in sorted(model_files, key=_model_id_from_name):
-		mid = _model_id_from_name(fname)
-		model_path = os.path.join(models_dir, fname)
+	for model_path in sorted(model_files_paths, key=_model_id_from_path):
+		mid = _model_id_from_path(model_path)
 		with open(model_path, "r", encoding="utf-8") as f:
 			model_data = json.load(f)
 
@@ -198,7 +267,7 @@ def plot_all_models_for_N(N: int, base_dir: str = "output") -> None:
 			ax.plot(steps, test_acc, label=f"model {mid} test")
 
 	# add avg curve if available
-	agg_path = _resolve_base_paths(os.path.join(base_dir, "data.json"))
+	agg_path = _resolve_base_paths(os.path.join(base_dir or _DEFAULT_BASE_DIR, "data.json"))
 	if os.path.exists(agg_path):
 		with open(agg_path, "r", encoding="utf-8") as f:
 			agg_data = json.load(f)
@@ -231,38 +300,32 @@ def plot_all_models_for_N(N: int, base_dir: str = "output") -> None:
 	plt.show()
 
 
-def plot_all_models(base_dir: str = "output") -> None:
+def plot_all_models(base_dir: str | None = None) -> None:
 	"""Overlay test curves of *all* individual models for all N on one graph.
 
-	Iterates over base_dir/<N>/<model_id>.json and plots each model's
-	test accuracy vs its stored steps on a single axes.
+	Walks the entire output tree to find model JSON files at any depth.
 	"""
 
-	base_path = _resolve_base_paths(base_dir)
-	if not os.path.isdir(base_path):
-		raise FileNotFoundError(f"Base output directory not found: {base_path}")
-
-	n_dirs = [d for d in os.listdir(base_path) if os.path.isdir(os.path.join(base_path, d)) and d.isdigit()]
-	if not n_dirs:
-		raise ValueError(f"No N subdirectories found under {base_path}")
+	all_files = _find_all_model_files(base_dir)
+	if not all_files:
+		raise ValueError("No model JSON files found in output directory")
 
 	_, ax = plt.subplots(1, 1, figsize=(8, 6))
 
-	for n_str in sorted(n_dirs, key=int):
-		models_dir = os.path.join(base_path, n_str)
-		model_files = [f for f in os.listdir(models_dir) if f.endswith(".json")]
-		for fname in sorted(model_files, key=lambda name: int(os.path.splitext(name)[0])):
-			model_path = os.path.join(models_dir, fname)
-			with open(model_path, "r", encoding="utf-8") as f:
-				model_data = json.load(f)
+	for n_str, model_path in sorted(all_files, key=lambda p: (int(p[0]), p[1])):
+		with open(model_path, "r", encoding="utf-8") as f:
+			model_data = json.load(f)
 
-			steps = model_data.get("steps", [])
-			test_acc = model_data.get("test_acc", [])
-			if not steps or not test_acc:
-				continue
+		steps = model_data.get("steps", [])
+		test_acc = model_data.get("test_acc", [])
+		if not steps or not test_acc:
+			continue
 
-			model_id = os.path.splitext(fname)[0]
-			ax.plot(steps, test_acc, label=f"N={n_str}, model={model_id}")
+		model_id = os.path.splitext(os.path.basename(model_path))[0]
+		# Include parent dirs for context since N alone is no longer unique
+		rel_path = os.path.relpath(os.path.dirname(model_path),
+			os.path.join(os.path.dirname(__file__), base_dir or _DEFAULT_BASE_DIR))
+		ax.plot(steps, test_acc, label=f"{rel_path}/m{model_id}")
 
 	ax.set_xlabel("Step")
 	ax.set_ylabel("Accuracy (%)")
@@ -273,7 +336,7 @@ def plot_all_models(base_dir: str = "output") -> None:
 
 
 def plot_avg_train_time_by_N(
-	data_path: str = r"output\data.json",
+	data_path: str | None = None,
 	show: bool = True,
 	ax: Optional[plt.Axes] = None,
 ) -> None:
@@ -283,7 +346,7 @@ def plot_avg_train_time_by_N(
 	N on the x-axis vs average training time (seconds) on the y-axis.
 	"""
 
-	abs_path = _resolve_base_paths(data_path)
+	abs_path = _resolve_base_paths(data_path or _DEFAULT_DATA_PATH)
 	if not os.path.exists(abs_path):
 		raise FileNotFoundError(f"Aggregate data file not found: {abs_path}")
 
@@ -323,7 +386,7 @@ def plot_avg_train_time_by_N(
 
 def plot_train_time_heatmap(
 	n_per_row: int,
-	data_path: str = r"output\data.json",
+	data_path: str | None = None,
 	show: bool = True,
 	ax: Optional[plt.Axes] = None,
 ) -> None:
@@ -338,7 +401,7 @@ def plot_train_time_heatmap(
 	if n_per_row <= 0:
 		raise ValueError("n_per_row must be a positive integer")
 
-	abs_path = _resolve_base_paths(data_path)
+	abs_path = _resolve_base_paths(data_path or _DEFAULT_DATA_PATH)
 	if not os.path.exists(abs_path):
 		raise FileNotFoundError(f"Aggregate data file not found: {abs_path}")
 
@@ -404,16 +467,10 @@ def plot_train_time_heatmap(
 
 
 if __name__ == "__main__":
-	# Example usage
-	#plot_avg_for_N(67)
-	#print("0:")
-	#plot_model_for_N(67, 0)
-	#print("1:")
-	#plot_model_for_N(67, 1)
-	#print("2:")
-	#plot_model_for_N(67, 2)
-	print("all 67:")
-	plot_all_models_for_N(3)
+	# Example usage — pass a state tuple to filter by exact parameter combo,
+	# or omit it to aggregate across all combos for that N.
+	print("all models for N=10 (all param combos):")
+	plot_all_models_for_N(10)
 	print("all Ns:")
 	plot_all_models()
 	print("heatmap:")
