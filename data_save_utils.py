@@ -21,8 +21,9 @@ EMPTY_MODEL_ENTRY = {
 EMPTY_SMALL_DATA = {
     'num_of_sacrifices': 0,
     'num_of_grokked': 0,
+    'avg_train_time': 0.0,
     'N': {
-        # 'specific_N': EMPTY_SMALL_DATA_ENTRY 
+        # 'specific_N': EMPTY_SMALL_DATA_ENTRY
     }
 }
 
@@ -89,6 +90,11 @@ class ModelInfo:
         data['num_of_sacrifices'] += 1
         if grokked:
             data['num_of_grokked'] += 1
+
+        # Global running average training time (seconds per model)
+        count = data['num_of_sacrifices']
+        prev_avg = float(data.get('avg_train_time', 0.0))
+        data['avg_train_time'] = prev_avg + (float(train_time) - prev_avg) / count
 
         n_str = str(self.N)
         if n_str not in data['N']:
@@ -270,10 +276,10 @@ class ModelInfo:
 
                     rel = os.path.relpath(full_path, base_dir)
                     parts = rel.split(os.sep)
-                    # Expect structure: weight_decay/learning_rate/N/model.json
-                    if len(parts) < 4:
+                    # Expect structure: d_model/n_heads/train_pct/weight_decay/learning_rate/N/model.json
+                    if len(parts) < 7:
                         continue
-                    wd_key, lr_key = parts[0], parts[1]
+                    wd_key, lr_key = parts[3], parts[4]
 
                     try:
                         with open(full_path, 'r', encoding='utf-8') as mf:
@@ -384,6 +390,9 @@ class ModelInfo:
         for key in ("num_of_sacrifices", "num_of_grokked", "N"):
             if key not in data:
                 raise ValueError(f"data.json missing required top-level key: {key}")
+        # avg_train_time is optional for backward compat — seed to 0 if absent
+        if "avg_train_time" not in data:
+            data["avg_train_time"] = 0.0
 
         if not isinstance(data["N"], dict):
             raise ValueError("data['N'] must be a JSON object mapping N to entries")

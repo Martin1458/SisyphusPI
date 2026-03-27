@@ -9,58 +9,75 @@ _INFO_KEYS = ['d_model', 'n_heads', 'train_pct', 'weight_decay', 'learning_rate'
 
 
 def get_resume_state():
-    """Return state as (N, wave, [index_per_param_list]) from saved progress."""
+    """Return state as (N, wave, [index_per_param_list]) from saved progress.
+
+    State ordering (innermost → outermost):
+        N  →  param_indices  →  wave
+    """
     param_list_lengths = [len(lst) for lst in SMART_CONFIG[2]]
-    
-    n = 0
+    n_values    = (MAX_N - MIN_N) // N_STEP + 1
+    total_params = math.prod(param_list_lengths)
+    num_of_waves = SMART_CONFIG[1]
+
+    s = 0
     if os.path.exists(AGGREGATE_DATA_PATH):
         try:
             with open(AGGREGATE_DATA_PATH, "r", encoding="utf-8") as f:
                 agg_data = json.load(f)
-            n = int(agg_data.get("num_of_sacrifices", 0))
+            s = int(agg_data.get("num_of_sacrifices", 0))
         except Exception:
-            n = 0
-    
-    total_combinations = math.prod(param_list_lengths)
-    n = n % total_combinations
-    
-    # Decompose n into per-list indices (mixed-radix → digit extraction)
+            s = 0
+
+    total_per_wave = n_values * total_params
+    wave_0indexed  = s // total_per_wave
+    if wave_0indexed >= num_of_waves:
+        return None  # all done
+
+    within_wave  = s % total_per_wave
+    n_index      = within_wave % n_values
+    N            = MIN_N + n_index * N_STEP
+    param_linear = within_wave // n_values
+
+    # Decompose param_linear into per-list indices (mixed-radix)
     param_indices = []
-    remaining = n
+    remaining = param_linear
     for i in range(len(param_list_lengths)):
-        right_side_product = math.prod(param_list_lengths[i+1:])
+        right_side_product = math.prod(param_list_lengths[i + 1:])
         param_indices.append(remaining // right_side_product)
         remaining %= right_side_product
-    
-    return (MIN_N, SMART_CONFIG[1], param_indices)
+
+    wave = wave_0indexed + 1  # 1-indexed
+    return (N, wave, param_indices)
 
 
 def get_next_state(current_state):
-    """Advance state by one step. Returns None when all combinations are exhausted."""
+    """Advance state by one step. Returns None when all combinations are exhausted.
+
+    Order of advancement (innermost → outermost):
+        N  →  param_indices  →  wave
+    """
     (N_curr, wave_curr, param_indices) = current_state
     param_list_lengths = [len(lst) for lst in SMART_CONFIG[2]]
-    
-    # Advance N first (innermost wheel)
-    if N_curr + N_STEP > MAX_N:
-        N_next = ((N_curr + N_STEP) % MAX_N) + MIN_N
-        if wave_curr == SMART_CONFIG[1]:
-            return None  # All done
-        else:
-            wave_next = wave_curr + 1
-    else:
-        N_next = N_curr + N_STEP
-        return (N_next, wave_curr, list(param_indices))
-    
-    # N wrapped — increment parameter indices right-to-left (odometer carry)
+
+    # Advance N (innermost wheel)
+    if N_curr + N_STEP <= MAX_N:
+        return (N_curr + N_STEP, wave_curr, list(param_indices))
+
+    # N wrapped — advance param_indices (odometer carry, right-to-left)
+    N_next = MIN_N
     new_indices = list(param_indices)
     for i in reversed(range(len(new_indices))):
         if new_indices[i] + 1 < param_list_lengths[i]:
             new_indices[i] += 1
-            return (N_next, wave_next, new_indices)
+            return (N_next, wave_curr, new_indices)
         else:
-            new_indices[i] = 0  # wrap and carry
-    
-    return (N_next, wave_next, new_indices)
+            new_indices[i] = 0  # carry
+
+    # All param indices wrapped — advance wave
+    wave_next = wave_curr + 1
+    if wave_next > SMART_CONFIG[1]:
+        return None  # all done
+    return (N_next, wave_next, new_indices)  # new_indices is all zeros
 
 
 def get_param_values(state):

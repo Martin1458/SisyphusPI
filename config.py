@@ -155,3 +155,9 @@ SMART_CONFIG = (
     )
 SMART_LISTS_NAMES = ["D_MODELS", "N_HEADS_LIST", "TRAIN_PCTS", "WEIGHT_DECAYS", "LEARNING_RATES"]
 
+def get_total_number_of_models():
+	n_values = (MAX_N - MIN_N) // N_STEP + 1
+	param_combinations = 1
+	for lst in SMART_CONFIG[2]:
+		param_combinations *= len(lst)
+	return n_values * param_combinations * SMART_CONFIG[1]
